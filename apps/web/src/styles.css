@@ -1,0 +1,293 @@
+@font-face {
+  font-family: "NauryzRedKeds";
+  src: url("/fonts/NauryzRedKeds.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Minecraft Rus";
+  src: url("/fonts/minecraft_0.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Google Sans";
+  src: url("/fonts/GoogleSansFlex-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Google Sans Cyrillic";
+  src: url("/fonts/Roboto-Medium-Cyrillic.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+:root {
+  font-family: "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #222;
+  background: #202020;
+  font-synthesis: none;
+  --accent: #008bff;
+  --glass: linear-gradient(135deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.2) 48%, rgba(255, 255, 255, 0.48));
+  --shadow: 0 10px 34px rgba(31, 38, 49, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.95), inset 1px 0 1px rgba(255, 255, 255, 0.55), inset 0 -1px 1px rgba(88, 98, 112, 0.12);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; min-height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+body { position: fixed; inset: 0; -webkit-user-select: none; user-select: none; }
+button, input { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+button { color: inherit; }
+
+.app-shell { position: fixed; inset: 0; width: 100vw; height: 100%; min-height: 0; display: grid; place-items: center; background: #f2f2f2; overscroll-behavior: none; }
+.phone-frame { position: relative; width: 100vw; height: 100%; min-height: 0; overflow: hidden; border-radius: 0; background: #fff; overscroll-behavior: none; }
+
+.loading-screen { position:absolute; left:50%; top:50%; width:min(100vw, calc(100vh * 402 / 874), 402px); height:auto; aspect-ratio:402 / 874; overflow:hidden; transform:translate(-50%, -50%); background:#fff; }
+.parallax-background { position:absolute; z-index:0; inset:0; overflow:hidden; visibility:hidden; pointer-events:none; background:#6f55cd; --parallax-x:0; --parallax-y:0; }
+.parallax-background.ready { visibility:visible; }
+.parallax-layer { position:absolute; left:-4%; top:-4%; width:108%; height:108%; max-width:none; object-fit:cover; object-position:center; user-select:none; will-change:transform; transform:translate3d(calc(var(--parallax-x) * var(--layer-depth) * 22px), calc(var(--parallax-y) * var(--layer-depth) * 22px), 0) scale(1.01); }
+.loading-logo { position:absolute; z-index:1; top:calc(70px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:325px; max-width:calc(100% - 56px); height:auto; transform:translateX(-50%); image-rendering:pixelated; }
+.loading-content { position:absolute; z-index:1; left:50%; bottom:45px; display:flex; flex-direction:column; align-items:center; gap:7px; transform:translateX(-50%); color:#fff; font-family:"Minecraft Rus", monospace; font-size:16px; line-height:1; white-space:nowrap; }
+.loading-animation { width:93px; height:70px; flex:0 0 auto; }
+@media (max-width:700px) {
+  .loading-screen { left:0; top:0; width:100vw; height:100%; aspect-ratio:auto; transform:none; }
+}
+.brand-pill {
+  font-family: "NauryzRedKeds", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  -webkit-text-stroke: 0.22px currentColor;
+}
+
+.battle-screen, .board-wrap { position: absolute; inset: 0; background: #fff; touch-action: none; overscroll-behavior: none; }
+.board-wrap { background-color:#A8A8A8; background-image:conic-gradient(#A8A8A8 25%,#CACACA 0 50%,#A8A8A8 0 75%,#CACACA 0); background-size:16px 16px; }
+.main-menu, .stats-screen, .rating-screen, .agreement-screen { position:absolute; inset:0; overflow:hidden; background:#fff; }
+.main-menu { position:absolute; left:50%; top:50%; width:min(100vw, calc(100vh * 402 / 874), 402px); height:auto; aspect-ratio:402 / 874; transform:translate(-50%, -50%); border-radius:0; background:#fff; }
+.stats-screen, .rating-screen, .agreement-screen { left:50%; top:50%; width:min(100vw, calc(100vh * 402 / 874), 402px); height:auto; aspect-ratio:402 / 874; transform:translate(-50%, -50%); }
+@media (max-width:700px) {
+  .main-menu, .stats-screen, .rating-screen, .agreement-screen { left:0; top:0; width:100vw; height:100%; aspect-ratio:auto; transform:none; }
+}
+.menu-logo { position:absolute; z-index:1; top:calc(70px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:325px; max-width:calc(100% - 56px); height:auto; transform:translateX(-50%); image-rendering:pixelated; }
+.menu-art { position:absolute; left:16px; right:16px; top:190px; bottom:180px; display:grid; place-items:center; overflow:hidden; }
+.menu-art img { width:min(100%, 360px); height:auto; object-fit:contain; mix-blend-mode:multiply; }
+.menu-actions { position:absolute; z-index:2; left:50%; bottom:50px; width:calc(100% - 66px); transform:translateX(-50%); display:grid; gap:0; }
+.main-menu .menu-logo { animation:menu-logo-enter .65s cubic-bezier(.22,1,.36,1) both; }
+.main-menu .menu-actions { animation:menu-actions-enter .65s cubic-bezier(.22,1,.36,1) .06s both; }
+@keyframes menu-logo-enter { from { opacity:0; transform:translate(-50%,-18px); } to { opacity:1; transform:translate(-50%,0); } }
+@keyframes menu-actions-enter { from { opacity:0; transform:translate(-50%,22px); } to { opacity:1; transform:translate(-50%,0); } }
+@media (prefers-reduced-motion:reduce) {
+  .parallax-layer { transform:none; }
+  .main-menu .menu-logo, .main-menu .menu-actions { animation:none; }
+}
+.menu-button { width:100%; height:60px; border:4px solid #fff; border-radius:10px; font-family:"Minecraft Rus", monospace; font-size:20px; cursor:pointer; box-shadow:0 0 0 4px #000; transition:transform .12s steps(2, end), box-shadow .12s steps(2, end), filter .12s steps(2, end); image-rendering:pixelated; }
+.menu-button:active { transform:translateY(3px); box-shadow:0 0 0 1px #000; filter:brightness(.86); }
+.menu-button-primary { order:2; position:relative; z-index:2; color:#fff; background:#000; }
+.menu-button-secondary { order:1; position:relative; z-index:1; width:88%; height:42px; margin-bottom:-6px; justify-self:center; color:#111; background:#fff; border-width:3px; border-radius:6px; box-shadow:0 0 0 3px #000; font-size:16px; }
+.menu-button-secondary span { display:block; transform:translateY(-5px); }
+.menu-button-secondary:active { box-shadow:0 0 0 1px #000; }
+.stats-content { position:absolute; inset:118px 20px 28px; overflow:auto; padding:18px 8px; }
+.stats-redesign { inset:0; padding:0 18px 150px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }
+.stats-top-cards { display:grid; grid-template-columns:1fr; gap:8px; margin:0 auto 16px; max-width:370px; }
+.stats-pixel-card { min-height:88px; padding:10px 8px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; background:#fff; border:2px solid #000; border-radius:7px; box-shadow:none; }
+.stats-pixel-card > span { font-size:11px; line-height:1.2; }
+.stats-pixel-card strong { margin-top:0; font-family:"Vyaz Pixel", "Minecraft Rus", monospace; font-size:27px; line-height:1; }
+.stats-casino-number { justify-content:center; font-size:32px; font-weight:700; line-height:1; }
+.stats-casino-number .casino-digit { width:.58em; }
+.stats-casino-number .casino-digit b { font-weight:700; }
+.stats-pixel-card > span { margin-top:6px; }
+.stats-profile { max-width:370px; margin:18px auto 18px; padding:4px 12px 14px; display:flex; flex-direction:column; gap:12px; text-align:center; }
+.stats-logo { display:block; width:min(325px, calc(100vw - 56px)); max-width:100%; height:auto; margin:calc(70px + var(--tg-content-safe-area-inset-top, 0px)) auto 0; image-rendering:pixelated; }
+.stats-avatar { width:82px; height:82px; flex:0 0 auto; display:block; margin:12px auto 0; border:4px solid #000; border-radius:7px; object-fit:cover; }
+.stats-avatar-fallback { display:grid; place-items:center; background:#c5c5c5; font-size:34px; }
+.stats-username { display:block; font-size:17px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stats-level-progress { width:100%; display:grid; grid-template-columns:auto minmax(0, 1fr) auto; align-items:center; gap:9px; margin-top:0; font-size:16px; line-height:1; font-variant-numeric:tabular-nums; }
+.stats-level-button { width:100%; margin:0; padding:4px 0; border:0; display:grid; grid-template-columns:22px minmax(0,1fr) 22px; align-items:center; gap:8px; color:inherit; background:transparent; font-family:inherit; cursor:pointer; }
+.stats-level-hint-icon { width:22px; height:22px; display:block; object-fit:contain; image-rendering:pixelated; }
+.stats-level-button:active { transform:translateY(1px); }
+.stats-progress { position:relative; height:8px; overflow:visible; border:2px solid #000; border-radius:999px; background:#fff; }
+.stats-progress em { position:absolute; left:-2px; top:-2px; bottom:-2px; display:block; border-radius:999px 0 0 999px; background:#000; transition:width .8s cubic-bezier(.22,1,.36,1); }
+.stats-progress i { position:absolute; z-index:1; top:50%; width:14px; height:14px; padding:3px; background:#000; transform:translate(-50%, -50%); transition:left .8s cubic-bezier(.22,1,.36,1); }
+.stats-progress i b { display:block; width:100%; height:100%; background:#fff; }
+.stats-simple, .stats-quests { max-width:370px; margin:0 auto 18px; }
+.stats-simple h2, .stats-quests h2 { margin:0 0 9px; font-size:18px; font-weight:400; }
+.stats-simple p { display:flex; justify-content:space-between; margin:0; padding:7px 0; border-bottom:2px solid #000; font-size:12px; }
+.stats-simple strong { font-family:"Vyaz Pixel", "Minecraft Rus", monospace; font-size:16px; }
+.quest { position:relative; width:100%; min-height:38px; padding:5px 0; display:flex; justify-content:space-between; align-items:center; background:transparent; font-family:inherit; font-size:14px; text-align:left; }
+.quest strong { font-weight:400; white-space:nowrap; }
+.quest.done::after { content:""; position:absolute; z-index:1; left:-6px; right:-6px; top:50%; height:3px; background:#000; transform:translateY(-50%); pointer-events:none; }
+.quest-notification-layer { position:fixed; z-index:30; top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 28px); left:max(var(--tg-content-safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px)); right:max(var(--tg-content-safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px)); display:flex; justify-content:center; padding:0 14px; pointer-events:none; }
+.quest-notification { position:relative; width:min(310px, 100%); height:56px; padding:9px 14px 8px; display:flex; box-sizing:border-box; align-items:center; justify-content:center; color:#000; font-family:"Minecraft Rus",monospace; text-align:center; image-rendering:pixelated; animation:quest-notice-life 4.1s cubic-bezier(.22,1,.36,1) both; }
+.quest-notification-shape { position:absolute; z-index:0; left:0; top:-16px; width:100%; height:72px; overflow:visible; }
+.quest-notification-shape path { fill:#fff; stroke:#000; stroke-width:3px; stroke-linejoin:round; }
+.quest-notification-text { position:relative; z-index:1; max-width:100%; font-size:13px; line-height:1.2; }
+.quest-notification-text::after { content:""; position:absolute; z-index:1; left:-4px; top:50%; width:calc(100% + 8px); height:3px; background:#000; transform:translateY(-50%) scaleX(0); transform-origin:left center; animation:quest-notice-strike .525s cubic-bezier(.22,1,.36,1) 1.25s forwards; }
+@media (max-width:600px), (pointer:coarse) { .quest-notification-layer { top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 50px); } }
+@keyframes quest-notice-life { 0% { opacity:0; transform:translateY(-28px) scale(.96); } 10%,82% { opacity:1; transform:translateY(0) scale(1); } 100% { opacity:0; transform:translateY(-18px) scale(.98); } }
+@keyframes quest-notice-strike { to { transform:translateY(-50%) scaleX(1); } }
+@media (prefers-reduced-motion:reduce) { .quest-notification { animation:quest-notice-fade 4.1s ease both; } .quest-notification-text::after { animation:quest-notice-strike .15s linear 1.25s forwards; } }
+@keyframes quest-notice-fade { 0%,100% { opacity:0; } 8%,88% { opacity:1; } }
+.stats-agreement, .stats-back { width:100%; font-family:inherit; cursor:pointer; }
+.stats-agreement { margin:4px 0 12px; border:0; background:transparent; font-size:10px; text-decoration:underline; }
+.stats-agreement:disabled { color:#000; opacity:1; }
+.stats-back { position:absolute; left:50%; bottom:50px; display:block; box-sizing:border-box; width:calc(100% - 66px); height:60px; min-height:60px; margin:0; padding:0; border:4px solid #fff; border-radius:10px; color:#fff; background:#000; box-shadow:0 0 0 4px #000; font-family:"Minecraft Rus", monospace; font-size:20px; font-weight:400; line-height:normal; transform:translateX(-50%); }
+.stats-screen .stats-back { z-index:3; }
+.rating-screen { font-family:"Minecraft Rus",monospace; color:#000; }
+.rating-screen::after { content:""; position:absolute; z-index:2; right:0; bottom:0; left:0; height:168px; pointer-events:none; background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.78) 42%,#fff 72%); }
+.rating-logo { position:absolute; z-index:3; top:calc(72px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:223px; height:63px; object-fit:contain; transform:translateX(-50%); image-rendering:pixelated; }
+.rating-scroll { position:absolute; z-index:1; top:178px; right:0; bottom:0; left:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior-y:contain; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.rating-scroll::-webkit-scrollbar { display:none; }
+.rating-track-area { position:relative; width:100%; min-height:8950px; padding:0 18px 150px; }
+.rating-track { position:absolute; z-index:0; top:44px; bottom:194px; left:50%; width:9px; border:3px solid #000; border-radius:5px; background:#fff; transform:translateX(-50%); }
+.rating-track > i { position:absolute; right:-3px; bottom:-3px; left:-3px; display:block; border-radius:0 0 5px 5px; background:#000; }
+.rating-track > b { position:absolute; z-index:2; left:50%; width:16px; height:16px; border:3px solid #000; background:#fff; transform:translate(-50%, 50%); }
+.rating-row { position:relative; z-index:1; height:88px; display:grid; grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr); align-items:center; }
+.rating-level-side { grid-column:1; min-width:0; display:flex; align-items:center; justify-content:flex-end; gap:9px; }
+.rating-level-number { min-width:30px; font-size:16px; line-height:1; text-align:right; font-variant-numeric:tabular-nums; }
+.rating-avatar { width:52px; height:52px; flex:0 0 auto; border:2px solid #000; border-radius:9px; display:block; object-fit:cover; background:#c5c5c5; }
+.rating-avatar-fallback { display:grid; place-items:center; overflow:hidden; font-size:24px; }
+.rating-reward { grid-column:3; justify-self:start; width:78px; height:62px; margin-left:7px; padding:4px; border:0; border-radius:9px; display:grid; place-items:center; color:#000; background:transparent; font-family:"Vyaz Pixel","Minecraft Rus",monospace; cursor:default; }
+.rating-reward > span { width:70px; height:54px; padding:6px 7px; border:3px solid #000; border-radius:6px; display:flex; align-items:center; justify-content:center; gap:5px; background:#fff; }
+.rating-reward img { width:31px; height:31px; display:block; object-fit:contain; image-rendering:pixelated; }
+.rating-reward b { min-width:13px; font-size:25px; font-weight:400; line-height:1; }
+.rating-reward.available { padding:3px; border:3px solid #000; background:#59ff00; cursor:pointer; }
+.rating-reward.available > span { width:66px; height:50px; padding:4px; border-width:3px; }
+.rating-reward.available:active { transform:translateY(2px); filter:brightness(.9); }
+.rating-reward.claimed > span { background:#c5c5c5; }
+.rating-reward:disabled { opacity:1; }
+.rating-back { z-index:4; }
+.rating-status { position:absolute; inset:180px 30px 150px; display:grid; place-content:center; text-align:center; }
+.rating-status p { margin:0 0 16px; font-size:13px; }
+.rating-status button { height:42px; padding:0 18px; border:3px solid #000; border-radius:7px; color:#000; background:#fff; font-family:inherit; }
+.agreement-content { position:absolute; inset:0; padding:calc(46px + var(--tg-content-safe-area-inset-top, 0px)) 24px 145px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; font-family:"Minecraft Rus", monospace; color:#000; }
+.agreement-screen::before, .agreement-screen::after { content:""; position:absolute; z-index:2; left:0; right:0; pointer-events:none; -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); }
+.agreement-screen::before { top:0; height:calc(42px + var(--tg-content-safe-area-inset-top, 0px)); background:linear-gradient(to bottom, rgba(255,255,255,.98) 0%, rgba(255,255,255,.72) 55%, rgba(255,255,255,0) 100%); -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 55%,transparent 100%); mask-image:linear-gradient(to bottom,#000 0%,#000 55%,transparent 100%); }
+.agreement-screen::after { bottom:0; height:145px; background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,.78) 38%,#fff 68%); -webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 48%,#000 100%); mask-image:linear-gradient(to bottom,transparent 0%,#000 48%,#000 100%); }
+.agreement-screen .stats-back { z-index:3; }
+.agreement-content h1 { max-width:330px; margin:0 auto 18px; font-size:22px; font-weight:400; line-height:1.35; text-align:center; }
+.agreement-intro, .agreement-note { margin:0 0 16px; font-size:12px; line-height:1.5; }
+.agreement-rules { margin:0 0 22px; padding-left:24px; display:grid; gap:12px; font-size:12px; line-height:1.5; }
+.agreement-content h2 { margin:0 0 12px; font-size:20px; font-weight:400; }
+.developer-list { display:grid; gap:10px; }
+.developer-card { padding:10px; display:grid; grid-template-columns:64px minmax(0, 1fr); align-items:center; gap:11px; border:2px solid #000; border-radius:7px; }
+.developer-card img, .developer-card video { width:64px; height:64px; display:block; border:2px solid #000; border-radius:7px; object-fit:cover; }
+.developer-card a { color:#000; font-size:14px; text-decoration:underline; }
+.developer-card p { margin:5px 0 0; font-size:10px; line-height:1.45; }
+.stats-content h1 { margin:0 0 22px; font-size:26px; font-weight:700; }
+.stats-grid { display:grid; gap:12px; }
+.stats-status { margin:0; color:#68717c; font-size:15px; }
+.stats-status p { margin:0 0 14px; }
+.stats-status button { min-width:132px; height:42px; padding:0 18px; border:0; border-radius:999px; color:#fff; background:var(--accent); cursor:pointer; }
+.stat-card { min-height:108px; padding:18px; border-radius:24px; display:grid; align-content:center; gap:6px; }
+.stat-card strong { font-size:34px; line-height:1; }
+.stat-card span { color:#68717c; font-size:15px; }
+.pixel-board { width: 100%; height: 100%; display: block; background:transparent; touch-action: none; cursor: grab; user-select:none; -webkit-user-select:none; }
+.pixel-board:active { cursor: grabbing; }
+.pixel-board.eyedropper-mode { cursor: crosshair; }
+.glass-panel, .glass-button, .glass-stack {
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px) saturate(180%) brightness(1.06);
+  backdrop-filter: blur(18px) saturate(180%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow: var(--shadow);
+}
+.brand-pill { position:absolute; z-index:3; top:calc(max(16px, env(safe-area-inset-top)) + 20px); left:50%; transform:translateX(-50%); height:44px; display:grid; place-items:center; padding:0 16px; border-radius:296px; font-size:16px; white-space:nowrap; }
+
+.zoom-controls { position:absolute; z-index:3; left:max(16px, env(safe-area-inset-left)); top:50%; transform:translateY(-50%); display:grid; gap:8px; }
+.glass-button { width:44px; height:44px; padding:0; border:0; border-radius:50%; cursor:pointer; display:grid; place-items:center; }
+.zoom-controls > .glass-button, .zoom-controls > .glass-stack { background:#fff; border:2px solid #000; box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; }
+.zoom-controls > .glass-button { border-radius:9px; }
+.image-template-button img { width:30px; height:30px; object-fit:contain; image-rendering:pixelated; }
+.template-cancel-button { animation:template-cancel-in .22s cubic-bezier(.22,1,.36,1); }
+.template-close-glyph { transform:rotate(45deg); }
+@keyframes template-cancel-in { from { opacity:0; transform:translateY(-5px) scale(.8); } to { opacity:1; transform:translateY(0) scale(1); } }
+.glass-stack { width:44px; height:102px; border-radius:9px; overflow:hidden; }
+.glass-stack button { width:100%; height:50%; border:0; border-radius:0; background:#fff; cursor:pointer; display:grid; place-items:center; }
+.glass-stack button img { width:26px; height:26px; }
+.zoom-glyph { position:relative; width:24px; height:24px; display:block; }
+.zoom-glyph::before, .zoom-plus::after { content:""; position:absolute; left:50%; top:50%; background:#000; transform:translate(-50%,-50%); }
+.zoom-glyph::before { width:24px; height:3px; }
+.zoom-plus::after { width:3px; height:24px; }
+.glass-stack button:active, .glass-button:active { background:rgba(255,255,255,.34); box-shadow:inset 0 2px 8px rgba(34,42,56,.15); }
+.placement-dock { position:absolute; z-index:7; left:50%; bottom:50px; width:min(336px, calc(100vw - 66px)); transform:translateX(-50%); display:grid; gap:0; }
+.placement-meta-row { position:relative; z-index:1; order:1; width:100%; margin:0 auto 12px; display:flex; align-items:stretch; justify-content:center; gap:8px; }
+.placement-meta-row.without-owner { justify-content:center; }
+.pixel-owner-card { position:relative; box-sizing:border-box; flex:1 1 158px; min-width:0; height:43px; margin:0; padding:3px; border:3px solid #000; border-radius:8px 8px 8px 0; display:grid; grid-template-columns:31px minmax(0,1fr); align-items:center; background:#fff; color:#000; animation:pixel-owner-in .24s cubic-bezier(.22,1,.36,1) both; }
+@keyframes pixel-owner-in { from { opacity:0; transform:translateY(6px) scale(.97); } to { opacity:1; transform:none; } }
+.pixel-owner-avatar { grid-column:1; width:27px; height:27px; border:2px solid #000; border-radius:4px; object-fit:cover; image-rendering:auto; }
+.pixel-owner-fallback { display:grid; place-items:center; box-sizing:border-box; background:#eee; font-family:"Minecraft Rus",monospace; font-size:13px; }
+.pixel-owner-name { grid-column:2; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; font-family:"Minecraft Rus",monospace; font-size:14px; line-height:1; }
+.pixel-owner-balance { display:none; }
+.pixel-item-button { box-sizing:border-box; flex:0 0 auto; width:max-content; min-width:65px; height:43px; padding:3px 8px; border:3px solid #000; display:grid; grid-template-columns:23px auto; place-items:center; gap:3px; color:#000; background:#fff; box-shadow:none; font-family:"Minecraft Rus",monospace; font-size:14px; font-weight:400; line-height:1; cursor:pointer; }
+.pixel-item-button:first-of-type { border-radius:8px 8px 0 8px; }
+.pixel-item-button:last-of-type { border-radius:8px 8px 8px 0; }
+.pixel-item-button img { width:21px; height:21px; object-fit:contain; image-rendering:pixelated; }
+.pixel-item-button span { min-width:max-content; white-space:nowrap; }
+.pixel-item-button.selected { color:#fff; background:#000; }
+.pixel-item-button:disabled { cursor:default; opacity:1; }
+.placement-frame { position:relative; z-index:2; order:2; box-sizing:border-box; width:88%; height:42px; min-height:42px; margin:0 auto -6px; padding:3px; overflow:hidden; border:3px solid #fff; border-radius:6px; display:grid; grid-template-columns:44px minmax(0,1fr) 44px; grid-template-rows:36px 1fr; align-items:center; gap:0; background:#fff; box-shadow:0 0 0 3px #000; transition:width .32s cubic-bezier(.22,1,.36,1),height .32s cubic-bezier(.22,1,.36,1),margin-bottom .32s cubic-bezier(.22,1,.36,1),box-shadow .2s ease; }
+.placement-frame.open { width:calc(100% - 26px); height:160px; margin-bottom:-14px; box-shadow:0 0 0 4px #000; }
+.placement-spacer { width:22px; height:22px; justify-self:center; transform:translateY(-5px); }
+.selected-color { width:22px; height:22px; margin:auto 0 auto 1px; padding:0; border:2px solid #000; border-radius:4px; box-shadow:none; cursor:pointer; image-rendering:pixelated; transform:translateY(-7px); transition:transform .12s steps(2,end); }
+.selected-color:active { transform:translateY(-5px); }
+.coordinate-copy { min-width:0; height:36px; padding:0 4px; border:0; display:flex; align-items:center; justify-content:center; color:#000; background:transparent; cursor:pointer; font-family:"Minecraft Rus",monospace; font-size:14px; font-weight:400; font-variant-numeric:tabular-nums; transform:translateY(-7px); }
+.coordinate-copy:active:not(:disabled) { transform:translateY(-5px); }
+.coordinate-copy img { width:17px; height:17px; opacity:.68; }
+.coordinate-copy.copied { color:var(--accent); }
+.coordinate-copy.on-dark,.info-button.on-dark { color:#fff; }
+.coordinate-copy.on-dark img { filter:brightness(0) invert(1); }
+.coordinate-copy.on-light,.info-button.on-light { color:#111; }
+.coordinate-copy.on-light img { filter:brightness(0); }
+.coordinate-copy,.info-button,.coordinate-copy.on-dark,.info-button.on-dark { color:#000; }
+.coordinate-copy img,.coordinate-copy.on-dark img { filter:brightness(0); }
+.coordinate-copy:disabled { cursor:default; opacity:1; }
+.placement-palette { grid-column:1 / -1; align-self:start; width:100%; padding:4px 1px 0; display:grid; grid-template-columns:repeat(10,22px); justify-content:space-between; row-gap:6px; opacity:0; transform:translateY(-5px); pointer-events:none; transition:opacity .16s ease,transform .28s cubic-bezier(.22,1,.36,1); }
+.placement-frame.open .placement-palette { opacity:1; transform:none; pointer-events:auto; transition-delay:.08s; }
+.placement-palette button { width:22px; height:22px; padding:0; border:1px solid transparent; border-radius:4px; box-shadow:none; cursor:pointer; image-rendering:pixelated; }
+.placement-palette button.selected { outline:2px solid #000; outline-offset:1px; }
+.info-button { height:42px; padding:0 10px; border:0; border-radius:13px; color:#111; background:rgba(225,234,245,.68); cursor:pointer; font-size:14px; font-weight:650; transition:transform 180ms ease,background 180ms ease,color 180ms ease; }
+.info-button:active:not(:disabled) { transform:scale(.94); background:rgba(225,234,245,.86); }
+.info-button:disabled { cursor:default; opacity:1; }
+.dock-palette { order:1; max-height:0; margin:0; padding:0 10px; overflow:hidden; opacity:0; border-width:0; border-radius:20px; display:grid; grid-template-columns:repeat(10,minmax(20px,1fr)); gap:7px; transform:translateY(10px) scale(.975); transform-origin:bottom center; pointer-events:none; transition:max-height 360ms cubic-bezier(.22,1,.36,1),margin 300ms ease,padding 300ms ease,opacity 220ms ease,transform 360ms cubic-bezier(.22,1,.36,1),border-width 220ms ease; }
+.dock-palette.open { max-height:150px; margin:0 0 12px; padding:10px; opacity:1; border-width:1px; transform:none; pointer-events:auto; }
+.dock-palette button { width:100%; max-width:31px; aspect-ratio:1; margin:auto; padding:0; border:2px solid rgba(255,255,255,.72); border-radius:8px; box-shadow:0 2px 7px rgba(31,38,49,.16); cursor:pointer; transition:transform 140ms ease, box-shadow 140ms ease; }
+.dock-palette button.selected { transform:scale(1.12); box-shadow:0 0 0 2px var(--accent),0 3px 9px rgba(31,38,49,.22); }
+.paint-action { position:relative; z-index:3; order:3; box-sizing:border-box; width:100%; height:60px; margin:0; padding:0 18px; border:4px solid #fff; border-radius:10px; color:#fff; background:#000; box-shadow:0 0 0 4px #000; cursor:pointer; font-family:"Minecraft Rus",monospace; font-size:20px; font-weight:400; transition:transform .12s steps(2,end),box-shadow .12s steps(2,end),filter .12s steps(2,end); }
+.paint-action.visible { height:60px; margin:0; opacity:1; transform:none; pointer-events:auto; }
+.paint-action.frozen { background:#858585; }
+.paint-action:active:not(:disabled) { transform:translateY(3px); box-shadow:0 0 0 1px #000; filter:brightness(.86); }
+.paint-action.visible:disabled { cursor:default; opacity:1; }
+.casino-coordinates { display:flex; align-items:center; justify-content:center; gap:2px; height:1em; overflow:hidden; white-space:nowrap; }
+.coordinate-number { height:1em; overflow:hidden; display:block; font-variant-numeric:tabular-nums; }
+.coordinate-roll { width:100%; display:flex; flex-direction:column; font-style:normal; line-height:1em; }
+.coordinate-roll b { width:100%; height:1em; flex:0 0 1em; display:block; font-weight:400; text-align:center; }
+.coordinate-roll.increasing { animation-name:coordinate-roll-up; animation-timing-function:cubic-bezier(.2,.82,.24,1); animation-fill-mode:both; }
+.coordinate-roll.decreasing { animation-name:coordinate-roll-down; animation-timing-function:cubic-bezier(.2,.82,.24,1); animation-fill-mode:both; }
+@keyframes coordinate-roll-up { from { transform:translateY(0); } to { transform:translateY(var(--coordinate-offset)); } }
+@keyframes coordinate-roll-down { from { transform:translateY(var(--coordinate-offset)); } to { transform:translateY(0); } }
+.casino-number { display:flex; height:1em; }
+.casino-digit { width:.72em; height:1em; overflow:hidden; display:block; }
+.casino-digit i { display:flex; flex-direction:column; width:100%; font-style:normal; line-height:1em; animation:casino-roll .5s cubic-bezier(.2,.82,.24,1) both; }
+.casino-digit b { height:1em; display:block; flex:0 0 1em; font-weight:400; text-align:center; }
+@keyframes casino-roll { from { transform:translateY(0); } to { transform:translateY(-7em); } }
+.profile-modal-backdrop { position:absolute; z-index:20; inset:0; padding:24px; display:grid; place-items:center; background:rgba(7,12,20,.58); -webkit-backdrop-filter:blur(5px); backdrop-filter:blur(5px); animation:modal-fade 160ms ease-out; }
+.profile-modal { position:relative; width:min(360px, calc(100vw - 32px)); min-height:270px; padding:36px 28px 30px; border-radius:30px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; background:linear-gradient(145deg,rgba(255,255,255,.92),rgba(230,238,248,.76)); box-shadow:0 24px 70px rgba(0,0,0,.32),inset 0 1px 1px rgba(255,255,255,.96); }
+.profile-modal-close { position:absolute; top:14px; right:14px; width:34px; height:34px; padding:0; border:0; border-radius:50%; color:#526174; background:rgba(255,255,255,.62); cursor:pointer; font-size:25px; line-height:30px; }
+.profile-modal-avatar { width:104px; height:104px; border-radius:50%; object-fit:cover; box-shadow:0 10px 30px rgba(20,31,48,.2); }
+.profile-modal-fallback { display:grid; place-items:center; color:#fff; background:linear-gradient(135deg,#168fff,#7557e8); font-size:42px; font-weight:750; }
+.profile-modal-identity { max-width:100%; display:flex; align-items:baseline; justify-content:center; gap:10px; flex-wrap:wrap; text-align:center; }
+.profile-modal-identity strong { max-width:100%; overflow:hidden; text-overflow:ellipsis; font-size:19px; }
+.profile-modal-identity a,.profile-modal-identity span { color:var(--accent); font-size:15px; text-decoration:none; }
+@keyframes modal-fade { from { opacity:0; } to { opacity:1; } }
+@media (min-width:800px) { .profile-modal { min-height:300px; } }
+@media (max-width:380px) { .placement-frame { grid-template-columns:44px minmax(0,1fr) 44px; }.dock-palette { gap:5px; } }
+
+@font-face { font-family: 'Vyaz Pixel'; src: url('/fonts/Vyaz%20Pixel.ttf') format('truetype'); font-display: swap; }

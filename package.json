@@ -1,0 +1,11 @@
+{
+  "name": "pixel-battle",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "npm --workspace @pixel-battle/web run dev",
+    "build": "npm --workspace @pixel-battle/web run build",
+    "typecheck": "npm --workspace @pixel-battle/web run typecheck"
+  }
+}
+

@@ -1,0 +1,12 @@
+<svg width="11" height="11" viewBox="0 0 11 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="1" height="3.22238" transform="matrix(0.707107 0.707107 0.707107 -0.707107 0.000488281 5.5094)" fill="black"/>
+<rect width="1" height="3.17577" transform="matrix(-0.707107 0.707107 0.707107 0.707107 0.707092 4.80225)" fill="black"/>
+<rect x="10.9858" y="5.5094" width="1" height="3.22238" transform="rotate(135 10.9858 5.5094)" fill="black"/>
+<rect x="10.2792" y="4.80225" width="1" height="3.17577" transform="rotate(45 10.2792 4.80225)" fill="black"/>
+<rect x="10.0002" y="4.97375" width="1" height="9" transform="rotate(90 10.0002 4.97375)" fill="black"/>
+<rect width="1" height="3.22238" transform="matrix(-0.707107 0.707107 0.707107 0.707107 5.47638 0.000610352)" fill="black"/>
+<rect width="1" height="3.17577" transform="matrix(-0.707107 -0.707107 -0.707107 0.707107 6.18341 0.707153)" fill="black"/>
+<rect x="5.47687" y="10.9856" width="1" height="3.22238" transform="rotate(-135 5.47687 10.9856)" fill="black"/>
+<rect x="6.1839" y="10.2789" width="1" height="3.17577" transform="rotate(135 6.1839 10.2789)" fill="black"/>
+<rect x="6.01227" y="9.99988" width="1" height="9" transform="rotate(-180 6.01227 9.99988)" fill="black"/>
+</svg>
