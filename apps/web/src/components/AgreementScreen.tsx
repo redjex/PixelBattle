@@ -35,19 +35,19 @@ export function AgreementScreen({ onBack }: Props) {
 
         <p className="agreement-note">Продолжая пользоваться Pixel Battle, вы принимаете настоящую политику и обязуетесь соблюдать правила проекта. Последнее обновление: 4 сентября 2026 года.</p>
 
-        <h2>Разработчики</h2>
+        <h2>Команда проекта:</h2>
         <div className="developer-list">
           <article className="developer-card">
             <img src="/assets/redjex.jpg" alt="redjex" />
-            <div><a href="https://t.me/redjex" target="_blank" rel="noreferrer">@redjex</a><p>Разработчик проекта: Back-end, Front-end, архитектура, серверная часть и интеграция Telegram.</p></div>
-          </article>
-          <article className="developer-card">
-            <video src="/assets/soun.mp4" autoPlay loop muted playsInline aria-label="Арт от ocktokto" />
-            <div><a href="https://t.me/ocktokto" target="_blank" rel="noreferrer">@ocktokto</a><p>Художник проекта — создал основной арт Pixel Battle.</p></div>
+            <div><a href="https://t.me/redjex" target="_blank" rel="noreferrer">redjex</a><p>Разработчик проекта</p></div>
           </article>
           <article className="developer-card">
             <img src="/assets/idea.png" alt="IdeaAnimator" />
-            <div><a href="https://t.me/IdeaAnimator" target="_blank" rel="noreferrer">@IdeaAnimator</a><p>UI/UX дизайнер проекта — придумал концепцию Pixel Battle и нарисовал UI/UX, а также сделал некоторые анимации.</p></div>
+            <div><a href="https://t.me/IdeaAnimator" target="_blank" rel="noreferrer">IdeaAnimator</a><p>Дизайнер и Идеолог проекта</p></div>
+          </article>
+          <article className="developer-card">
+            <video src="/assets/soun.mp4" autoPlay loop muted playsInline aria-label="Арт от Oktokto" />
+            <div><a href="https://t.me/ocktokto" target="_blank" rel="noreferrer">Oktokto</a><p>Художник арта «PixelBattle»</p></div>
           </article>
         </div>
       </section>
