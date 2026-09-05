@@ -19,7 +19,9 @@ const layers = layerSources.map((src, index) => {
   const foregroundPosition = index / (layerSources.length - 1);
   return {
     src,
-    depth: 0.015 + 0.985 * Math.pow(foregroundPosition, 2.4),
+    depth: src === '/assets/fone/moon-3.png'
+      ? 0.025
+      : 0.015 + 0.985 * Math.pow(foregroundPosition, 2.4),
   };
 });
 
