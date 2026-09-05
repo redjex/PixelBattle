@@ -1,12 +1,16 @@
 export function getPlayerLevelProgress(placedPixels: number) {
-  const questCount = Math.max(0, Math.floor(placedPixels / 10));
+  const normalizedPlacedPixels = Math.max(0, Math.floor(placedPixels));
+  const questCount = Math.floor(normalizedPlacedPixels / 10);
   const level = Math.min(100, Math.floor(Math.log2(questCount + 1)) + 1);
   const currentLevelStart = level <= 1 ? 0 : 2 ** (level - 1) - 1;
   const nextLevelTarget = level >= 100 ? currentLevelStart : 2 ** level - 1;
   const progress = level >= 100
     ? 1
     : Math.min(1, (questCount - currentLevelStart) / Math.max(1, nextLevelTarget - currentLevelStart));
-  return { level, progress };
+  const pixelsToNextLevel = level >= 100
+    ? 0
+    : Math.max(0, nextLevelTarget * 10 - normalizedPlacedPixels);
+  return { level, progress, pixelsToNextLevel };
 }
 
 export function getLevelReward(level: number) {

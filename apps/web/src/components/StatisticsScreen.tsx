@@ -70,7 +70,7 @@ export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating }: Prop
   const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const username = user?.username ? `@${user.username}` : user?.first_name || 'Игрок';
   const avatar = user?.photo_url;
-  const { level, progress } = getPlayerLevelProgress(stats.placedPixels);
+  const { level, progress, pixelsToNextLevel } = getPlayerLevelProgress(stats.placedPixels);
   const currentLevelReward = getLevelReward(level);
   const nextLevelReward = level < 100 ? getLevelReward(level + 1) : null;
   const [displayedProgress, setDisplayedProgress] = useState(0);
@@ -120,6 +120,7 @@ export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating }: Prop
             <div className="stats-top-cards">
               <article className="stats-pixel-card"><strong><CasinoStatNumber value={stats.repaintedPixels} /></strong><span>Пикселей перекрашено</span></article>
               <article className="stats-pixel-card"><strong><CasinoStatNumber value={stats.currentPixels} /></strong><span>Твоих пикселей на карте</span></article>
+              <article className="stats-pixel-card"><strong><CasinoStatNumber value={pixelsToNextLevel} /></strong><span>Пикселей до следующего уровня</span></article>
             </div>
             <section className="stats-quests">{visibleQuests.map((quest) => <div key={quest.id} className={quest.done ? 'quest done' : 'quest'}><span>{quest.label}</span><strong>{quest.completed} / {quest.target}</strong></div>)}</section>
         <button className="stats-agreement" onClick={onOpenAgreement}>Политика конфиденциальности</button>
