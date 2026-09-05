@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { getTelegramWebApp } from '../telegram';
 
-const layers = [
-  { src: '/assets/fone/landscape.png', depth: 0.46 },
-  { src: '/assets/fone/behind-mountains.png', depth: 0.38 },
-  { src: '/assets/fone/after-behind-mountains.png', depth: 0.32 },
-  { src: '/assets/fone/clouds.png', depth: 0.42 },
-  { src: '/assets/fone/right-mountain.png', depth: 0.25 },
-  { src: '/assets/fone/plan-2.png', depth: 0.18 },
-  { src: '/assets/fone/plan-2-5.png', depth: 0.04 },
-  { src: '/assets/fone/plan-1.png', depth: 0.1 },
-  { src: '/assets/fone/moon-3.png', depth: 0.26 },
+// Layers are ordered from the farthest to the nearest. Their movement grows
+// exponentially towards the foreground instead of changing by equal steps.
+const layerSources = [
+  '/assets/fone/landscape.png',
+  '/assets/fone/behind-mountains.png',
+  '/assets/fone/after-behind-mountains.png',
+  '/assets/fone/clouds.png',
+  '/assets/fone/right-mountain.png',
+  '/assets/fone/plan-2.png',
+  '/assets/fone/plan-2-5.png',
+  '/assets/fone/plan-1.png',
+  '/assets/fone/moon-3.png',
 ] as const;
+
+const layers = layerSources.map((src, index) => {
+  const foregroundPosition = index / (layerSources.length - 1);
+  return {
+    src,
+    depth: 0.015 + 0.985 * Math.pow(foregroundPosition, 2.4),
+  };
+});
 
 const startupImageSources = [
   ...layers.map(({ src }) => src),
