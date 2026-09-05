@@ -25,7 +25,7 @@ func TestPlayerLevelMatchesFrontendProgression(t *testing.T) {
 	tests := []struct {
 		placed int64
 		level  int
-	}{{0, 1}, {10, 2}, {30, 3}, {70, 4}, {150, 5}}
+	}{{0, 1}, {9, 1}, {10, 2}, {29, 2}, {30, 3}, {59, 3}, {60, 4}, {99, 4}, {100, 5}, {3906, 28}, {49499, 99}, {49500, 100}}
 	for _, test := range tests {
 		if got := playerLevel(test.placed); got != test.level {
 			t.Errorf("playerLevel(%d) = %d, want %d", test.placed, got, test.level)

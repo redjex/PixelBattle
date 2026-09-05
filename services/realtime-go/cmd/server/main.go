@@ -12,7 +12,6 @@ import (
 	"image/color"
 	"image/png"
 	"log"
-	"math/bits"
 	"net/http"
 	"os"
 	"os/signal"
@@ -907,15 +906,23 @@ func bombIncludes(dx, dy int) bool {
 }
 
 func playerLevel(placedPixels int64) int {
-	quests := placedPixels / 10
-	level := bits.Len64(uint64(quests + 1))
-	if level < 1 {
-		return 1
+	if placedPixels < 0 {
+		placedPixels = 0
 	}
-	if level > 100 {
-		return 100
+	level := 1
+	for level < 100 && placedPixels >= pixelsRequiredForLevel(level+1) {
+		level++
 	}
 	return level
+}
+
+func pixelsRequiredForLevel(level int) int64 {
+	if level < 1 {
+		level = 1
+	} else if level > 100 {
+		level = 100
+	}
+	return int64(5 * (level - 1) * level)
 }
 
 func levelReward(level int) (string, int64) {
