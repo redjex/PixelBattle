@@ -8,9 +8,9 @@ const QUEST_DEFINITIONS: ReadonlyArray<{
   targets: readonly number[];
   label: (target: number) => string;
 }> = [
-  { id: 'place', metric: 'dailyPlacedPixels', targets: [10, 20, 30, 50], label: (target) => `Поставить ${target} пикселей` },
-  { id: 'repaint', metric: 'dailyRepaintedPixels', targets: [5, 10, 15, 25], label: (target) => `Перекрасить ${target} пикселей` },
-  { id: 'colors', metric: 'dailyColorsUsed', targets: [2, 3, 4, 5], label: (target) => `Использовать ${target} разных цветов` },
+  { id: 'place', metric: 'dailyPlacedPixels', targets: [10, 20, 30, 50], label: (target) => `Закрасить ${target} пикселей` },
+  { id: 'repaint', metric: 'dailyRepaintedPixels', targets: [5, 10, 15, 25], label: (target) => `Закрасить ${target} чужих пикселей` },
+  { id: 'colors', metric: 'dailyColorsUsed', targets: [2, 3, 4, 5], label: (target) => `Закрасить пиксели ${target} разными цветами` },
   { id: 'cells', metric: 'dailyUniqueCells', targets: [10, 20, 30, 40], label: (target) => `Закрасить ${target} разных клеток` },
 ];
 
