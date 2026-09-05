@@ -18,4 +18,4 @@ The web app works without backend services in mock mode. When the Go WebSocket i
 - `services/api-python`: business API for boards, profiles and administration.
 - `infrastructure`: PostgreSQL, Redis and service containers.
 
-The splash screen uses `apps/web/public/assets/Makaka.tgs`.
+The splash screen uses `apps/web/public/assets/loader.json`.
