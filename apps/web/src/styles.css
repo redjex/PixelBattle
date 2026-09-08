@@ -56,6 +56,7 @@ button { color: inherit; }
 .parallax-background.ready { visibility:visible; }
 .parallax-layer { position:absolute; left:-4%; top:-4%; width:108%; height:108%; max-width:none; object-fit:cover; object-position:center; user-select:none; will-change:transform; transform:translate3d(calc(var(--parallax-x) * var(--layer-depth) * 22px), calc(var(--parallax-y) * var(--layer-depth) * 22px), 0) scale(1.03); }
 .loading-logo { position:absolute; z-index:1; top:calc(70px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:325px; max-width:calc(100% - 56px); height:auto; transform:translateX(-50%); image-rendering:pixelated; }
+.season-badge { position:absolute; z-index:2; top:calc(150px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; min-width:116px; padding:7px 14px 6px; transform:translateX(-50%); border:3px solid #000; border-radius:6px; color:#000; background:#fff; box-shadow:0 4px 0 #000; font-family:"Minecraft Rus", monospace; font-size:15px; line-height:1; text-align:center; white-space:nowrap; image-rendering:pixelated; }
 .loading-content { position:absolute; z-index:1; left:50%; bottom:45px; display:flex; flex-direction:column; align-items:center; gap:7px; transform:translateX(-50%); color:#fff; font-family:"Minecraft Rus", monospace; font-size:16px; line-height:1; white-space:nowrap; }
 .loading-animation { width:93px; height:70px; flex:0 0 auto; }
 @media (max-width:700px) {
@@ -81,12 +82,14 @@ button { color: inherit; }
 .menu-art img { width:min(100%, 360px); height:auto; object-fit:contain; mix-blend-mode:multiply; }
 .menu-actions { position:absolute; z-index:2; left:50%; bottom:50px; width:calc(100% - 66px); transform:translateX(-50%); display:grid; gap:0; }
 .main-menu .menu-logo { animation:menu-logo-enter .65s cubic-bezier(.22,1,.36,1) both; }
+.main-menu .season-badge { animation:menu-season-enter .55s cubic-bezier(.22,1,.36,1) .08s both; }
 .main-menu .menu-actions { animation:menu-actions-enter .65s cubic-bezier(.22,1,.36,1) .06s both; }
 @keyframes menu-logo-enter { from { opacity:0; transform:translate(-50%,-18px); } to { opacity:1; transform:translate(-50%,0); } }
+@keyframes menu-season-enter { from { opacity:0; transform:translate(-50%,-10px); } to { opacity:1; transform:translate(-50%,0); } }
 @keyframes menu-actions-enter { from { opacity:0; transform:translate(-50%,22px); } to { opacity:1; transform:translate(-50%,0); } }
 @media (prefers-reduced-motion:reduce) {
   .parallax-layer { transform:none; }
-  .main-menu .menu-logo, .main-menu .menu-actions { animation:none; }
+  .main-menu .menu-logo, .main-menu .season-badge, .main-menu .menu-actions { animation:none; }
 }
 .menu-button { width:100%; height:60px; border:4px solid #fff; border-radius:10px; font-family:"Minecraft Rus", monospace; font-size:20px; cursor:pointer; box-shadow:0 0 0 4px #000; transition:transform .12s steps(2, end), box-shadow .12s steps(2, end), filter .12s steps(2, end); image-rendering:pixelated; }
 .menu-button:active { transform:translateY(3px); box-shadow:0 0 0 1px #000; filter:brightness(.86); }

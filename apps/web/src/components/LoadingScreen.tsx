@@ -6,6 +6,7 @@ export function LoadingScreen({ message = 'Загрузка...' }: { message?: s
     <div className="loading-screen" aria-label="Загрузка Pixel Battle">
       <ParallaxBackground />
       <img className="loading-logo" src="/assets/pixel_logo.png" alt="Pixel Battle" />
+      <div className="season-badge">Сезон №1</div>
       <div className="loading-content">
         <TgsPlayer className="loading-animation" src="/assets/loader.json" />
         <span>{message}</span>
