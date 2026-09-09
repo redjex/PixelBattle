@@ -392,9 +392,11 @@ def inline_map_result() -> dict[str, Any]:
         "id": f"pixel-battle-map-{image_version}",
         "photo_url": image_url,
         "thumbnail_url": image_url,
-        "photo_width": 600,
-        "photo_height": 600,
+        "photo_width": 1200,
+        "photo_height": 1200,
         "title": "PIXEL BATTLE",
+        "description": "Актуальная карта",
+        "caption": "Присоединяйся к битве!",
         "reply_markup": {
             "inline_keyboard": [
                 [{"text": "Открыть карту", "url": APP_LINK}],

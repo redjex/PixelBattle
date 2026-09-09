@@ -542,7 +542,7 @@ func main() {
 			canvas := renderMapCanvas(int(boardWidth.Load()), int(boardHeight.Load()), boardStore.Snapshot("main"))
 			boardMu.Unlock()
 			var output bytes.Buffer
-			if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: 90}); err != nil {
+			if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: 96}); err != nil {
 				http.Error(w, "failed to render map", http.StatusInternalServerError)
 				return
 			}
@@ -1152,7 +1152,7 @@ func profileFromTelegram(user auth.TelegramUser) domain.PixelAuthor {
 }
 
 func renderMapCanvas(width, height int, pixels []domain.BoardPixel) *image.RGBA {
-	const outputSize = 600
+	const outputSize = 1200
 	canvas := image.NewRGBA(image.Rect(0, 0, outputSize, outputSize))
 	for y := 0; y < outputSize; y++ {
 		for x := 0; x < outputSize; x++ {

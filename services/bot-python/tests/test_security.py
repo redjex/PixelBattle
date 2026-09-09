@@ -77,8 +77,10 @@ def test_inline_query_offers_shareable_map_button():
     assert result["title"] == "PIXEL BATTLE"
     assert result["id"] == "pixel-battle-map-20"
     assert result["photo_url"] == f"{bot.APP_URL}/inline-map.jpg?v=20"
-    assert "caption" not in result
-    assert "description" not in result
+    assert result["photo_width"] == 1200
+    assert result["photo_height"] == 1200
+    assert result["caption"] == "Присоединяйся к битве!"
+    assert result["description"] == "Актуальная карта"
     button = result["reply_markup"]["inline_keyboard"][0][0]
     assert button == {"text": "Открыть карту", "url": bot.APP_LINK}
 
