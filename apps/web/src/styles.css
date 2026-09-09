@@ -96,10 +96,10 @@ button { color: inherit; }
 .menu-shortcuts { position:relative; z-index:1; top:5px; order:1; width:100%; height:68px; margin:0 auto -6px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; gap:8px; }
 .menu-shortcut { position:relative; min-width:0; height:68px; padding:0; border:0; display:block; overflow:visible; background:transparent; cursor:pointer; transition:transform .12s steps(2,end),filter .12s steps(2,end); }
 .menu-shortcut::before { content:""; position:absolute; z-index:1; right:0; bottom:0; left:0; height:52px; box-sizing:border-box; border:16px solid transparent; border-width:16px 20px; border-image-source:url('/assets/profile.svg?v=2'); border-image-slice:16 20 fill; border-image-width:16px 20px; border-image-repeat:stretch; }
-.menu-shortcut span { position:absolute; z-index:3; top:38px; left:50%; color:#000; transform:translate(-50%,-50%); font-family:"Minecraft Rus",monospace; font-size:16px; line-height:1; white-space:nowrap; pointer-events:none; }
-.menu-shortcut-profile { top:5px; }
+.menu-shortcut span { position:absolute; z-index:4; top:38px; left:50%; color:#000; transform:translate(-50%,-50%); font-family:"Minecraft Rus",monospace; font-size:16px; line-height:1; white-space:nowrap; pointer-events:none; }
 .menu-shortcut-profile span { top:33px; }
-.menu-shortcut-crown { position:absolute; z-index:2; right:0; bottom:0; width:163px; height:69px; max-width:none; display:block; clip-path:inset(0 0 47px 96px); image-rendering:pixelated; pointer-events:none; }
+.menu-shortcut-present::after { content:""; position:absolute; z-index:2; top:16px; right:18px; width:36px; height:5px; background:#fff; pointer-events:none; }
+.menu-shortcut-crown { position:absolute; z-index:3; top:0; right:10px; width:51px; height:24px; display:block; overflow:visible; pointer-events:none; }
 .menu-shortcut:active { transform:translateY(3px); filter:brightness(.86); }
 .menu-shortcut:disabled { pointer-events:none; filter:grayscale(1); }
 .gifts-screen, .gifts-catalog-screen { font-family:"Minecraft Rus",monospace; color:#000; }

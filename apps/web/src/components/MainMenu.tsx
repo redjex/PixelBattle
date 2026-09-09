@@ -15,7 +15,10 @@ export function MainMenu({ onOpenMap, onOpenStats, onOpenGifts, maintenance, onl
             <span>Профиль</span>
           </button>
           <button className="menu-shortcut menu-shortcut-present" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
-            <img className="menu-shortcut-crown" src="/assets/present.svg?v=2" alt="" />
+            <svg className="menu-shortcut-crown" viewBox="102 0 51 24" aria-hidden="true">
+              <path d="M109.407 21.019c.703 0 1.187-.707.932-1.363l-3.906-10.032c-.33-.851.557-1.664 1.375-1.26l11.115 5.484c.471.232 1.041.061 1.306-.392l6.408-10.961c.386-.66 1.34-.66 1.726 0l6.408 10.961c.265.453.835.624 1.306.392l11.115-5.484c.818-.404 1.705.409 1.375 1.26l-3.906 10.032c-.255.656.229 1.363.932 1.363Z" fill="#fff" />
+              <path d="M109.407 21.019c.703 0 1.187-.707.932-1.363l-3.906-10.032c-.33-.851.557-1.664 1.375-1.26l11.115 5.484c.471.232 1.041.061 1.306-.392l6.408-10.961c.386-.66 1.34-.66 1.726 0l6.408 10.961c.265.453.835.624 1.306.392l11.115-5.484c.818-.404 1.705.409 1.375 1.26l-3.906 10.032c-.255.656.229 1.363.932 1.363" fill="none" stroke="#000" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
             <span>Трофеи</span>
           </button>
         </div>
