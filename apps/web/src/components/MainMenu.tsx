@@ -10,12 +10,15 @@ export function MainMenu({ onOpenMap, onOpenStats, onOpenGifts, maintenance, onl
       <SeasonStatus online={online} showOnline />
       <img className="menu-logo" src="/assets/pixel_logo.png" alt="Pixel Battle" />
       <div className="menu-actions">
-        <button className="menu-gifts" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
-          <img src="/assets/gifts.png?v=2" alt="" />
-          <span>Трофеи</span>
-        </button>
+        <div className="menu-shortcuts">
+          <button className="menu-shortcut" onClick={onOpenStats} disabled={maintenance} aria-label="Открыть профиль">
+            <img src="/assets/profile.svg?v=1" alt="" />
+          </button>
+          <button className="menu-shortcut" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
+            <img src="/assets/present.svg?v=1" alt="" />
+          </button>
+        </div>
         <button className="menu-button menu-button-primary" onClick={onOpenMap} disabled={maintenance}>{maintenance ? 'Тех. обслуживание' : 'Открыть карту'}</button>
-        <button className="menu-button menu-button-secondary" onClick={onOpenStats} disabled={maintenance}><span>Статистика</span></button>
       </div>
     </div>
   );
