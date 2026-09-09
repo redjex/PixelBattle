@@ -4,8 +4,9 @@ services:
     environment:
       POSTGRES_DB: pixelbattle
       POSTGRES_USER: pixelbattle
-      POSTGRES_PASSWORD: pixelbattle
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the root .env}
     volumes: ["postgres-data:/var/lib/postgresql/data"]
+    networks: [storage]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pixelbattle"]
       interval: 5s
@@ -16,6 +17,7 @@ services:
     image: redis:8-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes: ["redis-data:/data"]
+    networks: [storage]
 
   realtime:
     build: ../services/realtime-go
@@ -27,13 +29,16 @@ services:
       GO_DEV_IN_MEMORY: "false"
       GO_ALLOWED_ORIGIN: https://pixelbattle.redjex.bond
       REDIS_URL: redis://redis:6379/0
-      POSTGRES_DSN: postgres://pixelbattle:pixelbattle@postgres:5432/pixelbattle?sslmode=disable
+      POSTGRES_DSN: ${POSTGRES_DSN:?Set POSTGRES_DSN with the matching database password}
       REDIS_CONSUMER_NAME: realtime-writer-${HOSTNAME:-local}
       TELEGRAM_INIT_DATA_MAX_AGE: ${TELEGRAM_INIT_DATA_MAX_AGE:-86400}
     restart: unless-stopped
     stop_grace_period: 30s
     ports: ["127.0.0.1:8080:8080"]
     depends_on: [postgres, redis]
+    networks: [default, storage]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
 
   api:
     build: ../services/api-python
@@ -41,12 +46,13 @@ services:
       - path: ../.env
         required: false
     ports: ["127.0.0.1:8000:8000"]
-    depends_on: [postgres]
     environment:
       API_WORKERS: 4
-      API_LIMIT_CONCURRENCY: 2000
+      API_LIMIT_CONCURRENCY: 200
       TELEGRAM_INIT_DATA_MAX_AGE: ${TELEGRAM_INIT_DATA_MAX_AGE:-86400}
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
 
   bot:
     build: ../services/bot-python
@@ -61,6 +67,9 @@ services:
       REALTIME_URL: http://realtime:8080
     restart: unless-stopped
     depends_on: [web, redis]
+    networks: [default, storage]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
 
   web:
     build: ../apps/web
@@ -70,3 +79,7 @@ services:
 volumes:
   postgres-data:
   redis-data:
+
+networks:
+  storage:
+    internal: true

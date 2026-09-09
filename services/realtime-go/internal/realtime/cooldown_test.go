@@ -1,9 +1,24 @@
 package realtime
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
+
+func TestCooldownBounded(t *testing.T) {
+	c := NewCooldown()
+	now := time.Now()
+	for i := 0; i < 10000; i++ {
+		c.Allow(fmt.Sprint(i), "main", time.Minute, now)
+	}
+	if allowed, _ := c.Allow("overflow", "main", time.Minute, now); allowed || len(c.last) != 10000 {
+		t.Fatal("cooldown table unbounded")
+	}
+	if allowed, _ := c.Allow("overflow", "main", time.Minute, now.Add(time.Minute)); !allowed || len(c.last) != 1 {
+		t.Fatal("expired cooldowns not reclaimed")
+	}
+}
 
 func TestCooldownAllowsOncePerBoardAndUser(t *testing.T) {
 	cooldown := NewCooldown()

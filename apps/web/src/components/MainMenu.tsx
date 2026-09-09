@@ -1,16 +1,17 @@
 import { ParallaxBackground } from './ParallaxBackground';
+import { SeasonStatus } from './SeasonStatus';
 
-type Props = { onOpenMap: () => void; onOpenStats: () => void };
+type Props = { onOpenMap: () => void; onOpenStats: () => void; maintenance: boolean; online: number | null };
 
-export function MainMenu({ onOpenMap, onOpenStats }: Props) {
+export function MainMenu({ onOpenMap, onOpenStats, maintenance, online }: Props) {
   return (
     <div className="main-menu" data-node-id="1878:25595">
       <ParallaxBackground />
+      <SeasonStatus online={online} showOnline />
       <img className="menu-logo" src="/assets/pixel_logo.png" alt="Pixel Battle" />
-      <div className="season-badge">Сезон №1</div>
       <div className="menu-actions">
-        <button className="menu-button menu-button-primary" onClick={onOpenMap}>Открыть карту</button>
-        <button className="menu-button menu-button-secondary" onClick={onOpenStats}><span>Статистика</span></button>
+        <button className="menu-button menu-button-primary" onClick={onOpenMap} disabled={maintenance}>{maintenance ? 'Тех. обслуживание' : 'Открыть карту'}</button>
+        <button className="menu-button menu-button-secondary" onClick={onOpenStats} disabled={maintenance}><span>Статистика</span></button>
       </div>
     </div>
   );

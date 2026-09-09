@@ -7,7 +7,8 @@ Local-first monorepo for a realtime pixel canvas.
 1. Copy `.env.example` to `.env`.
 2. Install frontend dependencies: `npm install`.
 3. Start the UI: `npm run dev`.
-4. Optional full stack: `docker compose -f infrastructure/compose.yaml up --build`.
+4. Configure server secrets and database credentials as described in `docs/SECURITY.md`.
+5. Optional full stack: `docker compose --env-file .env -f infrastructure/compose.yaml up --build`.
 
 The web app works without backend services in mock mode. When the Go WebSocket is available it automatically switches to realtime events.
 

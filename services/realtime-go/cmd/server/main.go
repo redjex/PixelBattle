@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5"
 	"pixelbattle/realtime/internal/access"
 	"pixelbattle/realtime/internal/auth"
 	"pixelbattle/realtime/internal/domain"
@@ -43,12 +44,11 @@ var itemPalette = []string{
 const defaultBoardSize = 150
 const placementCooldown = 5 * time.Second
 
-var builtinAdminIDs = []int64{743086174, 6997207264}
-
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hub := realtime.NewHub()
+	presence := newAppPresence(10 * time.Second)
 	cooldown := realtime.NewCooldown()
 	memoryQueue := queue.NewMemory()
 	var eventQueue queue.EventQueue = memoryQueue
@@ -61,49 +61,100 @@ func main() {
 	boardHeight.Store(defaultBoardSize)
 	boardCache := &boardSnapshotCache{}
 	adminAPIToken := env("ADMIN_API_TOKEN", "")
-	accessStore := access.New(ctx, env("REDIS_URL", "redis://localhost:6379/0"), builtinAdminIDs)
+	requestLimits := &rateLimiter{}
+	socketLimits := &connectionLimits{}
+	var boardMu sync.Mutex
+	var stopping atomic.Bool
+	var version atomic.Int64
+	startupCtx, startupCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer startupCancel()
+	adminIDs, err := access.ParseAdminIDs(os.Getenv("TELEGRAM_ADMIN_IDS"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	trustedProxies, err := parseTrustedProxies(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	devMemory := os.Getenv("GO_DEV_IN_MEMORY") == "true"
+	redisURL := env("REDIS_URL", "redis://localhost:6379/0")
+	accessURL := redisURL
+	if devMemory {
+		accessURL = ""
+		log.Print("WARNING: explicit development in-memory mode; placements are not durable")
+	}
+	accessStore, err := access.New(startupCtx, accessURL, adminIDs)
+	if err != nil {
+		log.Fatalf("access store startup failed: %v", err)
+	}
 	defer accessStore.Close()
 	go accessStore.Run(ctx)
 
-	if os.Getenv("GO_DEV_IN_MEMORY") != "true" {
-		candidate, err := queue.NewRedis(env("REDIS_URL", "redis://localhost:6379/0"))
+	if !devMemory {
+		writer, err = persistence.NewWriter(startupCtx, env("POSTGRES_DSN", "postgres://pixelbattle:pixelbattle@localhost:5432/pixelbattle?sslmode=disable"))
 		if err != nil {
-			log.Printf("redis disabled: %v", err)
-		} else if err = candidate.Ready(ctx); err != nil {
-			log.Printf("redis disabled: %v", err)
-		} else {
-			redisQueue = candidate
-			eventQueue = candidate
+			log.Fatalf("postgres startup failed: %v", err)
 		}
-		if pgWriter, err := persistence.NewWriter(ctx, env("POSTGRES_DSN", "postgres://pixelbattle:pixelbattle@localhost:5432/pixelbattle?sslmode=disable")); err == nil {
-			writer = pgWriter
-			defer writer.Close()
-			if err := writer.Migrate(ctx); err != nil {
-				log.Printf("migration: %v", err)
-			} else {
-				if size, sizeErr := writer.LoadBoardSize(ctx, "main"); sizeErr == nil && size.Width > 0 && size.Height > 0 {
-					boardWidth.Store(int64(size.Width))
-					boardHeight.Store(int64(size.Height))
-				}
-				if pixels, loadErr := writer.LoadSnapshot(ctx, "main"); loadErr == nil {
-					boardStore.Restore("main", pixels)
-					log.Printf("restored %d pixels from snapshot", len(pixels))
-				}
+		defer writer.Close()
+		if err := writer.AcquireLease(startupCtx); err != nil {
+			log.Fatal(err)
+		}
+		if err := writer.Migrate(startupCtx); err != nil {
+			log.Fatalf("migration failed: %v", err)
+		}
+		redisQueue, err = queue.NewRedis(redisURL)
+		if err != nil {
+			log.Fatalf("redis startup failed: %v", err)
+		}
+		defer redisQueue.Close()
+		if err := redisQueue.Ready(startupCtx); err != nil {
+			log.Fatalf("redis startup failed: %v", err)
+		}
+		if err := redisQueue.Recover(startupCtx, writer.WriteBatch); err != nil {
+			log.Fatalf("queue recovery failed: %v", err)
+		}
+		eventQueue = redisQueue
+		size, err := writer.LoadBoardSize(startupCtx, "main")
+		if err != nil && err != pgx.ErrNoRows {
+			log.Fatalf("board size load failed: %v", err)
+		}
+		if err == nil {
+			if size.Width < 16 || size.Height < 16 || size.Width > 500 || size.Height > 500 {
+				log.Fatal("invalid persisted board size")
 			}
-		} else {
-			log.Printf("postgres disabled: %v", err)
+			boardWidth.Store(int64(size.Width))
+			boardHeight.Store(int64(size.Height))
 		}
+		pixels, maximum, err := writer.RestoreBoard(startupCtx, "main")
+		if err != nil {
+			log.Fatalf("board restoration failed: %v", err)
+		}
+		for _, p := range pixels {
+			if p.X < 0 || p.Y < 0 || p.X >= int(boardWidth.Load()) || p.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(p.Color) {
+				log.Fatal("invalid persisted board pixel; reconciliation required")
+			}
+		}
+		boardStore.Restore("main", pixels)
+		version.Store(maximum)
+		go func() {
+			if err := writer.MonitorLease(ctx); err != nil {
+				log.Fatal(err)
+			}
+		}()
 	}
 	go persistence.RunMemoryBatcher(ctx, memoryQueue.Events, writer)
 	if redisQueue != nil && writer != nil {
 		go redisQueue.Consume(ctx, writer.WriteBatch)
 	}
 	if writer != nil {
-		go snapshotLoop(ctx, writer, boardStore)
+		go snapshotLoop(ctx, &boardMu, func(ctx context.Context) error {
+			return writer.WriteSnapshot(ctx, "main", boardStore.Snapshot("main"), version.Load(), persistence.BoardSize{Width: int(boardWidth.Load()), Height: int(boardHeight.Load())})
+		})
 	}
 
-	var version atomic.Int64
-	version.Store(boardStore.MaxVersion("main"))
+	checkpoint := func(ctx context.Context) error {
+		return writer.WriteSnapshot(ctx, "main", boardStore.Snapshot("main"), version.Load(), persistence.BoardSize{Width: int(boardWidth.Load()), Height: int(boardHeight.Load())})
+	}
 	allowedOrigin := env("GO_ALLOWED_ORIGIN", "http://localhost:5173")
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -113,6 +164,8 @@ func main() {
 		writeJSON(w, map[string]any{"status": "ok", "service": "realtime-go"})
 	})
 	http.HandleFunc("/api/boards/main", func(w http.ResponseWriter, r *http.Request) {
+		boardMu.Lock()
+		defer boardMu.Unlock()
 		// Board snapshots are protected just like WebSocket connections.
 		if _, err := telegramUserFromRequest(r); err != nil {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
@@ -143,6 +196,13 @@ func main() {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
 			return
 		}
+		testMode := accessStore.IsTestMode()
+		isAdmin := accessStore.IsAdmin(telegramUser.ID)
+		if testMode && !isAdmin {
+			writeJSON(w, map[string]any{"testMode": true, "isAdmin": false, "accessAllowed": false})
+			return
+		}
+		online := presence.Touch(telegramUser.ID)
 		if writer != nil {
 			if err := writer.UpsertProfile(r.Context(), profileFromTelegram(telegramUser)); err != nil {
 				log.Printf("profile upsert failed for user=%d: %v", telegramUser.ID, err)
@@ -153,7 +213,7 @@ func main() {
 		if writer != nil {
 			inventory, _ = writer.Inventory(r.Context(), strconv.FormatInt(telegramUser.ID, 10))
 		}
-		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory})
+		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true})
 	})
 	http.HandleFunc("/api/boards/main/rewards", func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -256,7 +316,9 @@ func main() {
 			return
 		}
 		var request domain.PlacementRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Type != "place_pixel" || request.BoardID != "main" || request.X < 0 || request.Y < 0 || request.X >= int(boardWidth.Load()) || request.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(request.Color) {
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || !operationIDPattern.MatchString(request.OperationID) || request.Type != "place_pixel" || request.BoardID != "main" || request.X < 0 || request.Y < 0 || request.X >= int(boardWidth.Load()) || request.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(request.Color) {
 			log.Printf("http placement rejected: decode=%v type=%q board=%q x=%d y=%d color=%q limits=%dx%d", err, request.Type, request.BoardID, request.X, request.Y, request.Color, boardWidth.Load(), boardHeight.Load())
 			http.Error(w, "invalid pixel placement", http.StatusBadRequest)
 			return
@@ -294,7 +356,7 @@ func main() {
 				frozenUntil = &expires
 			}
 		}
-		event := domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: request.BoardID, X: request.X, Y: request.Y, Color: request.Color, OperationID: request.OperationID, UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil}
+		event := domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: request.BoardID, X: request.X, Y: request.Y, Color: request.Color, OperationID: "server:" + id(), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil}
 		if err := eventQueue.Append(r.Context(), event); err != nil {
 			if freezeChargeUsed && writer != nil {
 				_ = writer.RefundFreezeCharge(r.Context(), identity)
@@ -305,7 +367,7 @@ func main() {
 		}
 		boardStore.Apply(event)
 		if freezeChargeUsed && writer != nil {
-			_ = writer.WriteSnapshot(r.Context(), "main", boardStore.Snapshot("main"))
+			_ = checkpoint(r.Context())
 		}
 		log.Printf("http placement accepted: user=%d x=%d y=%d version=%d", telegramUser.ID, event.X, event.Y, event.Version)
 		publicEvent := eventForClient(event)
@@ -315,6 +377,8 @@ func main() {
 		writeJSON(w, publicEvent)
 	})
 	http.HandleFunc("/api/boards/items/bomb/use", func(w http.ResponseWriter, r *http.Request) {
+		boardMu.Lock()
+		defer boardMu.Unlock()
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -338,7 +402,7 @@ func main() {
 			Color       string `json:"color"`
 			OperationID string `json:"operationId"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.X < 0 || request.Y < 0 || request.X >= int(boardWidth.Load()) || request.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(request.Color) || request.OperationID == "" {
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.X < 0 || request.Y < 0 || request.X >= int(boardWidth.Load()) || request.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(request.Color) || !operationIDPattern.MatchString(request.OperationID) {
 			http.Error(w, "invalid bomb target", http.StatusBadRequest)
 			return
 		}
@@ -371,7 +435,7 @@ func main() {
 					frozenUntil = current.FrozenUntil
 				}
 				shade := bombColor(colors, dx, dy)
-				events = append(events, domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: "main", X: x, Y: y, Color: shade, OperationID: fmt.Sprintf("%s:%d:%d", request.OperationID, dx+2, dy+2), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil})
+				events = append(events, domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: "main", X: x, Y: y, Color: shade, OperationID: "server:" + id(), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil})
 			}
 		}
 		if len(events) == 0 {
@@ -430,6 +494,10 @@ func main() {
 		}
 		telegramID := strings.TrimPrefix(r.URL.Path, "/api/profiles/")
 		telegramID = strings.TrimPrefix(telegramID, "/api/boards/profiles/")
+		if parsed, err := strconv.ParseInt(telegramID, 10, 64); err != nil || parsed <= 0 || strconv.FormatInt(parsed, 10) != telegramID {
+			http.Error(w, "profile not found", http.StatusNotFound)
+			return
+		}
 		if telegramID == "" || writer == nil {
 			http.Error(w, "profile not found", http.StatusNotFound)
 			return
@@ -445,7 +513,9 @@ func main() {
 	http.HandleFunc("/api/profiles/", profileHandler)
 	http.HandleFunc("/api/boards/profiles/", profileHandler)
 	http.HandleFunc("/api/boards/main/image", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -488,7 +558,9 @@ func main() {
 		_, _ = w.Write(output.Bytes())
 	})
 	http.HandleFunc("/api/admin/boards/main/size", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -504,17 +576,26 @@ func main() {
 			http.Error(w, "invalid board size", http.StatusBadRequest)
 			return
 		}
+		previousPixels := boardStore.Snapshot("main")
+		previousWidth, previousHeight := boardWidth.Load(), boardHeight.Load()
 		boardStore.Resize("main", request.Width, request.Height)
 		boardWidth.Store(int64(request.Width))
 		boardHeight.Store(int64(request.Height))
 		if writer != nil {
-			_ = writer.SaveBoardSize(r.Context(), "main", persistence.BoardSize{Width: request.Width, Height: request.Height})
-			_ = writer.WriteSnapshot(r.Context(), "main", boardStore.Snapshot("main"))
+			if err := checkpoint(r.Context()); err != nil {
+				boardStore.Restore("main", previousPixels)
+				boardWidth.Store(previousWidth)
+				boardHeight.Store(previousHeight)
+				http.Error(w, "failed to persist board size", http.StatusServiceUnavailable)
+				return
+			}
 		}
 		writeJSON(w, map[string]any{"width": request.Width, "height": request.Height})
 	})
 	http.HandleFunc("/api/admin/boards/main/fill", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -551,7 +632,7 @@ func main() {
 		}
 		previousPixels := boardStore.Snapshot("main")
 		boardStore.ApplyPixels("main", pixels)
-		if err := writer.WriteSnapshot(r.Context(), "main", boardStore.Snapshot("main")); err != nil {
+		if err := checkpoint(r.Context()); err != nil {
 			boardStore.Restore("main", previousPixels)
 			http.Error(w, "failed to persist fill", http.StatusServiceUnavailable)
 			return
@@ -560,7 +641,9 @@ func main() {
 		writeJSON(w, map[string]any{"filled": len(pixels), "x1": x1, "y1": y1, "x2": x2, "y2": y2, "color": request.Color})
 	})
 	http.HandleFunc("/api/admin/boards/main/image", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -596,7 +679,7 @@ func main() {
 		}
 		previousPixels := boardStore.Snapshot("main")
 		boardStore.ApplyPixels("main", pixels)
-		if err := writer.WriteSnapshot(r.Context(), "main", boardStore.Snapshot("main")); err != nil {
+		if err := checkpoint(r.Context()); err != nil {
 			boardStore.Restore("main", previousPixels)
 			http.Error(w, "failed to persist image", http.StatusServiceUnavailable)
 			return
@@ -605,7 +688,9 @@ func main() {
 		writeJSON(w, map[string]any{"placed": len(pixels)})
 	})
 	http.HandleFunc("/api/admin/boards/main/clear", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -625,7 +710,7 @@ func main() {
 			return
 		}
 		boardStore.Clear("main")
-		if err := writer.WriteSnapshot(r.Context(), "main", boardStore.Snapshot("main")); err != nil {
+		if err := checkpoint(r.Context()); err != nil {
 			boardStore.Restore("main", pixels)
 			http.Error(w, "failed to clear board", http.StatusServiceUnavailable)
 			return
@@ -633,7 +718,9 @@ func main() {
 		writeJSON(w, map[string]any{"cleared": true, "backupId": backupID})
 	})
 	http.HandleFunc("/api/admin/boards/main/restore", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -653,14 +740,18 @@ func main() {
 			http.Error(w, "backup not found", http.StatusNotFound)
 			return
 		}
+		previousPixels := boardStore.Snapshot("main")
+		previousWidth, previousHeight := boardWidth.Load(), boardHeight.Load()
+		for i := range backup.Pixels {
+			backup.Pixels[i].Version = version.Add(1)
+		}
 		boardStore.Restore("main", backup.Pixels)
 		boardWidth.Store(int64(backup.Width))
 		boardHeight.Store(int64(backup.Height))
-		if err := writer.SaveBoardSize(r.Context(), "main", persistence.BoardSize{Width: backup.Width, Height: backup.Height}); err != nil {
-			http.Error(w, "failed to restore board size", http.StatusServiceUnavailable)
-			return
-		}
-		if err := writer.WriteSnapshot(r.Context(), "main", backup.Pixels); err != nil {
+		if err := checkpoint(r.Context()); err != nil {
+			boardStore.Restore("main", previousPixels)
+			boardWidth.Store(previousWidth)
+			boardHeight.Store(previousHeight)
 			http.Error(w, "failed to restore board", http.StatusServiceUnavailable)
 			return
 		}
@@ -668,16 +759,16 @@ func main() {
 		writeJSON(w, map[string]any{"restored": true, "width": backup.Width, "height": backup.Height})
 	})
 	http.HandleFunc("/api/admin/stats", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
-		current := hub.OnlineCount()
+		current := presence.Count()
 		peak := accessStore.RecordOnlinePeak(r.Context(), current)
 		writeJSON(w, map[string]int64{"currentOnline": current, "peakOnline": peak})
 	})
 	http.HandleFunc("/api/admin/quests/reset", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -711,7 +802,7 @@ func main() {
 		writeJSON(w, map[string]any{"reset": true, "all": request.All, "userId": request.UserID})
 	})
 	http.HandleFunc("/api/admin/items/grant", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -740,7 +831,7 @@ func main() {
 		writeJSON(w, map[string]any{"granted": true, "userId": request.UserID, "item": request.Item, "amount": request.Amount, "inventory": inventory})
 	})
 	http.HandleFunc("/api/admin/game/pause", func(w http.ResponseWriter, r *http.Request) {
-		if adminAPIToken == "" || r.URL.Query().Get("adminToken") != adminAPIToken {
+		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
@@ -765,11 +856,47 @@ func main() {
 		}
 		writeJSON(w, map[string]bool{"paused": request.Paused})
 	})
+	http.HandleFunc("/api/admin/game/test-mode", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if r.Method == http.MethodGet {
+			writeJSON(w, map[string]bool{"enabled": accessStore.IsTestMode()})
+			return
+		}
+		if r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid test mode state", http.StatusBadRequest)
+			return
+		}
+		if err := accessStore.SetTestMode(r.Context(), request.Enabled); err != nil {
+			http.Error(w, "failed to save test mode state", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]bool{"enabled": request.Enabled})
+	})
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if !requestLimits.allow("ws:"+peerIP(r), 30, time.Now()) {
+			http.Error(w, "connection rate limit", http.StatusTooManyRequests)
+			return
+		}
+		if !socketLimits.acquire(peerIP(r)) {
+			http.Error(w, "connection limit", http.StatusServiceUnavailable)
+			return
+		}
+		defer socketLimits.release(peerIP(r))
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
+		defer conn.Close()
 		conn.SetReadLimit(16 << 10)
 		_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		var authentication struct {
@@ -777,14 +904,26 @@ func main() {
 			InitData string `json:"initData"`
 		}
 		if err := conn.ReadJSON(&authentication); err != nil || authentication.Type != "authenticate" {
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "authentication required"), time.Now().Add(time.Second))
 			_ = conn.Close()
 			return
 		}
 		telegramUser, err := auth.ValidateTelegramInitData(authentication.InitData)
 		if err != nil {
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "authentication failed"), time.Now().Add(time.Second))
 			_ = conn.Close()
 			return
 		}
+		if accessStore.IsTestMode() && !accessStore.IsAdmin(telegramUser.ID) {
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4403, "test mode enabled"), time.Now().Add(time.Second))
+			_ = conn.Close()
+			return
+		}
+		expiryTimer := time.AfterFunc(time.Until(telegramUser.ExpiresAt), func() {
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4401, "authentication expired"), time.Now().Add(time.Second))
+			_ = conn.Close()
+		})
+		defer expiryTimer.Stop()
 		if writer != nil {
 			if err := writer.UpsertProfile(r.Context(), profileFromTelegram(telegramUser)); err != nil {
 				log.Printf("profile upsert failed for user=%d: %v", telegramUser.ID, err)
@@ -793,7 +932,10 @@ func main() {
 		accessStore.RegisterUser(r.Context(), telegramUser.ID, telegramUser.Username)
 		identity := strconv.FormatInt(telegramUser.ID, 10)
 		client := hub.Add(conn, identity)
-		accessStore.RecordOnlinePeak(ctx, hub.OnlineCount())
+		if client == nil {
+			return
+		}
+		accessStore.RecordOnlinePeak(ctx, presence.Count())
 		defer hub.Remove(client)
 		conn.SetReadLimit(1024)
 		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -803,78 +945,92 @@ func main() {
 			if err := client.Conn.ReadJSON(&request); err != nil {
 				return
 			}
-			if accessStore.IsPaused() {
-				_ = client.SendJSON(map[string]any{"type": "error", "code": "game_paused", "message": "Game is paused"})
-				continue
+			if !time.Now().Before(telegramUser.ExpiresAt) || !requestLimits.allow("user:"+identity, 240, time.Now()) || (accessStore.IsTestMode() && !accessStore.IsAdmin(telegramUser.ID)) {
+				return
 			}
-			if request.Type != "place_pixel" || request.BoardID != "main" || request.X < 0 || request.Y < 0 || request.X >= int(boardWidth.Load()) || request.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(request.Color) {
-				_ = client.SendJSON(map[string]any{"type": "error", "code": "invalid_placement", "message": "Invalid pixel placement"})
-				continue
-			}
-			now := time.Now().UTC()
-			var existingFreeze *time.Time
-			if current, ok := boardStore.Pixel(request.BoardID, request.X, request.Y); ok && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
-				if current.Author.ID != identity {
-					_ = client.SendJSON(map[string]any{"type": "error", "code": "pixel_frozen", "frozenUntil": current.FrozenUntil})
-					continue
+			func() {
+				boardMu.Lock()
+				defer boardMu.Unlock()
+				if stopping.Load() {
+					return
 				}
-				existingFreeze = current.FrozenUntil
-			}
-			if userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown); userCooldown > 0 {
-				if allowed, retryAfter := cooldown.Allow(identity, request.BoardID, userCooldown, time.Now()); !allowed {
-					_ = client.SendJSON(map[string]any{"type": "error", "code": "placement_cooldown", "message": fmt.Sprintf("Place one pixel every %s", userCooldown), "retryAfterMs": retryAfter.Milliseconds()})
-					continue
+				if accessStore.IsPaused() {
+					_ = client.SendJSON(map[string]any{"type": "error", "code": "game_paused", "message": "Game is paused"})
+					return
 				}
-			}
-			author := profileFromTelegram(telegramUser)
-			frozenUntil := existingFreeze
-			freezeChargeUsed := false
-			if writer != nil && request.UseIce {
-				freezeChargeUsed, err = writer.ConsumeFreezeCharge(r.Context(), identity)
-				if err != nil {
-					_ = client.SendJSON(map[string]any{"type": "error", "code": "inventory_unavailable"})
-					continue
+				if !operationIDPattern.MatchString(request.OperationID) || request.Type != "place_pixel" || request.BoardID != "main" || request.X < 0 || request.Y < 0 || request.X >= int(boardWidth.Load()) || request.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(request.Color) {
+					_ = client.SendJSON(map[string]any{"type": "error", "code": "invalid_placement", "message": "Invalid pixel placement"})
+					return
 				}
-				if freezeChargeUsed {
-					expires := now.Add(10 * time.Minute)
-					frozenUntil = &expires
+				now := time.Now().UTC()
+				var existingFreeze *time.Time
+				if current, ok := boardStore.Pixel(request.BoardID, request.X, request.Y); ok && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
+					if current.Author.ID != identity {
+						_ = client.SendJSON(map[string]any{"type": "error", "code": "pixel_frozen", "frozenUntil": current.FrozenUntil})
+						return
+					}
+					existingFreeze = current.FrozenUntil
 				}
-			}
-			event := domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: request.BoardID, X: request.X, Y: request.Y, Color: request.Color, OperationID: request.OperationID, UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil}
-			if err := eventQueue.Append(r.Context(), event); err != nil {
+				if userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown); userCooldown > 0 {
+					if allowed, retryAfter := cooldown.Allow(identity, request.BoardID, userCooldown, time.Now()); !allowed {
+						_ = client.SendJSON(map[string]any{"type": "error", "code": "placement_cooldown", "message": fmt.Sprintf("Place one pixel every %s", userCooldown), "retryAfterMs": retryAfter.Milliseconds()})
+						return
+					}
+				}
+				author := profileFromTelegram(telegramUser)
+				frozenUntil := existingFreeze
+				freezeChargeUsed := false
+				if writer != nil && request.UseIce {
+					freezeChargeUsed, err = writer.ConsumeFreezeCharge(r.Context(), identity)
+					if err != nil {
+						_ = client.SendJSON(map[string]any{"type": "error", "code": "inventory_unavailable"})
+						return
+					}
+					if freezeChargeUsed {
+						expires := now.Add(10 * time.Minute)
+						frozenUntil = &expires
+					}
+				}
+				event := domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: request.BoardID, X: request.X, Y: request.Y, Color: request.Color, OperationID: "server:" + id(), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil}
+				if err := eventQueue.Append(r.Context(), event); err != nil {
+					if freezeChargeUsed && writer != nil {
+						_ = writer.RefundFreezeCharge(r.Context(), identity)
+					}
+					_ = client.SendJSON(map[string]any{"type": "error", "code": "queue_unavailable"})
+					return
+				}
+				boardStore.Apply(event)
 				if freezeChargeUsed && writer != nil {
-					_ = writer.RefundFreezeCharge(r.Context(), identity)
+					_ = checkpoint(r.Context())
 				}
-				_ = client.SendJSON(map[string]any{"type": "error", "code": "queue_unavailable"})
-				continue
-			}
-			boardStore.Apply(event)
-			if freezeChargeUsed && writer != nil {
-				_ = writer.WriteSnapshot(r.Context(), "main", boardStore.Snapshot("main"))
-			}
-			payload, _ := json.Marshal(eventForClient(event))
-			hub.Broadcast(payload)
+				payload, _ := json.Marshal(eventForClient(event))
+				hub.Broadcast(payload)
+			}()
 		}
 	})
 
 	addr := env("GO_HTTP_ADDR", ":8080")
-	server := &http.Server{Addr: addr, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 8 << 10}
+	server := &http.Server{Addr: addr, Handler: withTrustedProxies(secureHandler(http.DefaultServeMux, adminAPIToken, requestLimits, accessStore), trustedProxies), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 8 << 10}
 	stop := make(chan os.Signal, 1)
 	shutdownDone := make(chan struct{})
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
+		stopping.Store(true)
+		hub.Close()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		_ = server.Shutdown(shutdownCtx)
 		shutdownCancel()
 		if writer != nil {
+			boardMu.Lock()
 			snapshotCtx, snapshotCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := writer.WriteSnapshot(snapshotCtx, "main", boardStore.Snapshot("main")); err != nil {
+			if err := checkpoint(snapshotCtx); err != nil {
 				log.Printf("shutdown snapshot failed: %v", err)
 			} else {
 				log.Printf("shutdown snapshot saved")
 			}
 			snapshotCancel()
+			boardMu.Unlock()
 		}
 		cancel()
 		close(shutdownDone)
@@ -892,7 +1048,13 @@ func env(key, fallback string) string {
 	}
 	return fallback
 }
-func id() string       { b := make([]byte, 16); _, _ = rand.Read(b); return hex.EncodeToString(b) }
+func id() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic("secure random source unavailable")
+	}
+	return hex.EncodeToString(b)
+}
 func randomByte() byte { b := []byte{0}; _, _ = rand.Read(b); return b[0] }
 func bombIncludes(dx, dy int) bool {
 	distance := dx*dx + dy*dy
@@ -992,6 +1154,12 @@ func profileFromTelegram(user auth.TelegramUser) domain.PixelAuthor {
 	return domain.PixelAuthor{ID: strconv.FormatInt(user.ID, 10), DisplayName: displayName, Username: user.Username, PhotoURL: user.PhotoURL}
 }
 func telegramUserFromRequest(r *http.Request) (auth.TelegramUser, error) {
+	if user, ok := r.Context().Value(telegramUserKey{}).(auth.TelegramUser); ok {
+		return user, nil
+	}
+	if len(r.Header.Values("X-Telegram-Init-Data")) != 1 {
+		return auth.TelegramUser{}, auth.ErrInvalidTelegramData
+	}
 	return auth.ValidateTelegramInitData(r.Header.Get("X-Telegram-Init-Data"))
 }
 
@@ -1092,15 +1260,17 @@ func writeJSON(w http.ResponseWriter, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func snapshotLoop(ctx context.Context, writer *persistence.Writer, boards *state.BoardStore) {
+func snapshotLoop(ctx context.Context, mu *sync.Mutex, checkpoint func(context.Context) error) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			if err := writer.WriteSnapshot(ctx, "main", boards.Snapshot("main")); err != nil {
+			mu.Lock()
+			if err := checkpoint(ctx); err != nil {
 				log.Printf("snapshot: %v", err)
 			}
+			mu.Unlock()
 		case <-ctx.Done():
 			return
 		}

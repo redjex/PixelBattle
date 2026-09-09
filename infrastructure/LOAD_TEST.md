@@ -1,11 +1,11 @@
 # Нагрузочная проверка
 
-10 000 RPS нельзя подтвердить на машине разработчика или одним контейнером: итог зависит от CPU, сети, Redis, PostgreSQL и балансировщика. Production-схема должна запускать несколько экземпляров realtime и API за L7/L4 балансировщиком.
+10 000 RPS нельзя подтвердить на машине разработчика: итог зависит от CPU, сети, Redis, PostgreSQL и балансировщика. Realtime поддерживает только один экземпляр на доску; несколько экземпляров запрещены блокировкой PostgreSQL. Масштабирование требует отдельной распределённой архитектуры. Учитывайте ограничения запросов и настройте доверенный ingress по `docs/SECURITY.md`.
 
 Перед тестом подними стек:
 
 ```powershell
-docker compose -f infrastructure/compose.yaml up --build -d
+docker compose --env-file .env -f infrastructure/compose.yaml up --build -d
 ```
 
 Для HTTP smoke/load test можно использовать `bombardier`:

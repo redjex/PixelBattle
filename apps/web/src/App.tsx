@@ -4,7 +4,7 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { MainMenu } from './components/MainMenu';
 import { StatisticsScreen } from './components/StatisticsScreen';
 import { AgreementScreen } from './components/AgreementScreen';
-import { authenticateTelegram, getTelegramWebApp } from './telegram';
+import { authenticateTelegram, fetchAppAccess, getTelegramWebApp, type AppAccess } from './telegram';
 import { preloadBoardSnapshot } from './boardSnapshot';
 import { preloadStatistics } from './statisticsCache';
 import { QuestNotifications } from './components/QuestNotifications';
@@ -14,7 +14,9 @@ import { preloadRatingRewards, RatingScreen } from './components/RatingScreen';
 export function App() {
   const [loading, setLoading] = useState(true);
   const [authState, setAuthState] = useState<'checking' | 'denied' | 'invalid' | 'authorized'>('checking');
+  const [appAccess, setAppAccess] = useState<AppAccess | null>(null);
   const [screen, setScreen] = useState<'menu' | 'map' | 'stats' | 'rating' | 'agreement'>('menu');
+  const maintenanceMode = appAccess?.accessAllowed === false;
 
   useEffect(() => {
     void preloadParallaxBackground().catch(() => undefined);
@@ -94,20 +96,40 @@ export function App() {
     // The method is optional because older Telegram clients do not expose it.
     telegram.disableVerticalSwipes?.();
     telegram.expand();
-    authenticateTelegram(telegram.initData).then((valid) => {
-      if (valid) {
+    authenticateTelegram(telegram.initData).then((access) => {
+      if (access?.accessAllowed) {
         void preloadBoardSnapshot(telegram.initData).catch(() => undefined);
         void preloadStatistics(telegram.initData).catch(() => undefined);
         void preloadRatingRewards(telegram.initData).catch(() => undefined);
-        const avatarUrl = telegram.initDataUnsafe?.user?.photo_url;
-        if (avatarUrl) {
+         const avatarUrl = telegram.initDataUnsafe?.user?.photo_url;
+         if (avatarUrl && avatarUrl.startsWith('https://')) {
           const avatar = new Image();
           avatar.src = avatarUrl;
         }
       }
-      setAuthState(valid ? 'authorized' : 'invalid');
+      setAppAccess(access);
+      setAuthState(access ? 'authorized' : 'invalid');
     }).catch(() => setAuthState('invalid'));
   }, []);
+
+  useEffect(() => {
+    if (authState !== 'authorized') return;
+    const initData = getTelegramWebApp()?.initData;
+    if (!initData) return;
+    let active = true;
+    const syncAccess = () => {
+      void fetchAppAccess(initData).then((access) => {
+        if (!active) return;
+        setAppAccess(access);
+        if (!access.accessAllowed) setScreen('menu');
+      }).catch(() => undefined);
+    };
+    const timer = window.setInterval(syncAccess, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [authState]);
 
   useEffect(() => {
     if (authState !== 'authorized') return;
@@ -131,7 +153,7 @@ export function App() {
     const minimumSplash = new Promise<void>((resolve) => {
       timer = window.setTimeout(resolve, duration);
     });
-    const rewardsReady = telegram?.initData
+    const rewardsReady = appAccess?.accessAllowed && telegram?.initData
       ? preloadRatingRewards(telegram.initData).catch(() => undefined)
       : Promise.resolve();
     void Promise.all([minimumSplash, preloadParallaxBackground(), rewardsReady]).then(() => {
@@ -143,11 +165,11 @@ export function App() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [authState]);
+  }, [appAccess?.accessAllowed, authState]);
 
   if (authState !== 'authorized') return <main className="app-shell"><section className="phone-frame"><LoadingScreen message={authState === 'invalid' ? 'Ошибка проверки Telegram' : 'Откройте через Telegram'} /></section></main>;
   return <main className="app-shell"><section className="phone-frame" aria-label="Pixel Battle">
-    {loading ? <LoadingScreen /> : screen === 'menu' ? <MainMenu onOpenMap={() => setScreen('map')} onOpenStats={() => setScreen('stats')} /> : screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : <BattleScreen />}
-    {!loading && <QuestNotifications />}
+    {loading ? <LoadingScreen /> : maintenanceMode || screen === 'menu' ? <MainMenu maintenance={maintenanceMode} online={appAccess?.online ?? null} onOpenMap={() => { if (!maintenanceMode) setScreen('map'); }} onOpenStats={() => { if (!maintenanceMode) setScreen('stats'); }} /> : screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : <BattleScreen />}
+    {!loading && !maintenanceMode && <QuestNotifications />}
   </section></main>;
 }

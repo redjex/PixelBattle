@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -46,70 +48,86 @@ func (q *RedisQueue) Ready(ctx context.Context) error {
 	return nil
 }
 
+func (q *RedisQueue) Close() { _ = q.client.Close() }
+
 func (q *RedisQueue) Append(ctx context.Context, event domain.PixelEvent) error {
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	return q.client.XAdd(ctx, &redis.XAddArgs{Stream: q.stream, MaxLen: 1000000, Approx: true, Values: map[string]any{"payload": payload}}).Err()
+	// Never trim unacknowledged events. Successful writes delete their entries.
+	return q.client.XAdd(ctx, &redis.XAddArgs{Stream: q.stream, Values: map[string]any{"payload": payload}}).Err()
 }
 
 func (q *RedisQueue) Consume(ctx context.Context, write func(context.Context, []domain.PixelEvent) error) {
 	for ctx.Err() == nil {
-		events, ids, err := q.read(ctx, 500, 200*time.Millisecond)
-		if err != nil {
-			if errors.Is(err, redis.Nil) {
-				continue
-			}
-			time.Sleep(time.Second)
-			continue
+		if err := q.Recover(ctx, write); err != nil && ctx.Err() == nil {
+			log.Printf("queue recovery/write failed: %v", err)
 		}
-		deadline := time.Now().Add(200 * time.Millisecond)
-		for len(events) < 500 && time.Now().Before(deadline) {
-			moreEvents, moreIDs, readErr := q.read(ctx, int64(500-len(events)), time.Until(deadline))
-			if errors.Is(readErr, redis.Nil) {
-				break
-			}
-			if readErr != nil {
-				err = readErr
-				break
-			}
-			events = append(events, moreEvents...)
-			ids = append(ids, moreIDs...)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(200 * time.Millisecond):
 		}
-		if len(events) == 0 {
-			continue
-		}
-		if err := write(ctx, events); err != nil {
-			time.Sleep(time.Second)
-			continue
-		}
-		_ = q.client.XAck(ctx, q.stream, q.group, ids...).Err()
 	}
 }
 
-func (q *RedisQueue) read(ctx context.Context, count int64, block time.Duration) ([]domain.PixelEvent, []string, error) {
-	streams, err := q.client.XReadGroup(ctx, &redis.XReadGroupArgs{
-		Group: q.group, Consumer: q.name, Streams: []string{q.stream, ">"}, Count: count, Block: block,
-	}).Result()
-	if err != nil {
-		return nil, nil, err
-	}
-	events := make([]domain.PixelEvent, 0, count)
-	ids := make([]string, 0, count)
-	for _, stream := range streams {
-		for _, message := range stream.Messages {
-			raw, ok := message.Values["payload"].(string)
-			if !ok {
-				continue
-			}
-			var event domain.PixelEvent
-			if json.Unmarshal([]byte(raw), &event) != nil {
-				continue
-			}
-			events = append(events, event)
-			ids = append(ids, message.ID)
+// Recover drains pending entries (including dead consumers) before new entries.
+// The server holds a PostgreSQL singleton lock before calling this: MinIdle=0
+// is deliberate, so restart recovery need not wait for abandoned consumers.
+func (q *RedisQueue) Recover(ctx context.Context, write func(context.Context, []domain.PixelEvent) error) error {
+	for ctx.Err() == nil {
+		messages, _, err := q.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{Stream: q.stream, Group: q.group, Consumer: q.name, MinIdle: 0, Start: "0-0", Count: 500}).Result()
+		if err != nil {
+			return err
 		}
+		if len(messages) == 0 {
+			streams, err := q.client.XReadGroup(ctx, &redis.XReadGroupArgs{Group: q.group, Consumer: q.name, Streams: []string{q.stream, ">"}, Count: 500, Block: -1}).Result()
+			if errors.Is(err, redis.Nil) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			for _, stream := range streams {
+				messages = append(messages, stream.Messages...)
+			}
+		}
+		if len(messages) == 0 {
+			return nil
+		}
+		events, ids, err := decodeMessages(messages)
+		if err != nil {
+			return err
+		}
+		if err := write(ctx, events); err != nil {
+			return err
+		}
+		// Commit first, then atomically acknowledge/delete. Retrying after any
+		// ambiguous failure is safe because WriteBatch is idempotent.
+		_, err = q.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.XAck(ctx, q.stream, q.group, ids...)
+			pipe.XDel(ctx, q.stream, ids...)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func decodeMessages(messages []redis.XMessage) ([]domain.PixelEvent, []string, error) {
+	events := make([]domain.PixelEvent, 0, len(messages))
+	ids := make([]string, 0, len(messages))
+	for _, message := range messages {
+		raw, ok := message.Values["payload"].(string)
+		var event domain.PixelEvent
+		if !ok || json.Unmarshal([]byte(raw), &event) != nil || event.EventID == "" || event.OperationID == "" || event.BoardID != "main" || event.Version <= 0 {
+			return nil, nil, fmt.Errorf("invalid queue entry %s; operator repair required", message.ID)
+		}
+		events = append(events, event)
+		ids = append(ids, message.ID)
 	}
 	return events, ids, nil
 }

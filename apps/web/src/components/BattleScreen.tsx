@@ -227,6 +227,8 @@ export function BattleScreen() {
 
   const author = inspectedPixel?.author;
   const visibleAuthor = author && (author.username || author.displayName) ? author : null;
+  const safePhotoUrl = visibleAuthor?.photoUrl?.startsWith('https://') ? visibleAuthor.photoUrl : undefined;
+  const safeUsername = visibleAuthor?.username && /^[A-Za-z0-9_]{1,32}$/.test(visibleAuthor.username) ? visibleAuthor.username : undefined;
   const authorLabel = visibleAuthor?.username ? `@${visibleAuthor.username}` : visibleAuthor?.displayName ?? '';
   const authorTitle = visibleAuthor?.displayName || authorLabel;
   const authorIdentity = authorLabel || 'Нет данных';
@@ -366,8 +368,8 @@ export function BattleScreen() {
       <section className="placement-dock" aria-label="Панель закрашивания">
         <div className={`placement-meta-row${selectedPixel && visibleAuthor ? '' : ' without-owner'}`}>
             {selectedPixel && visibleAuthor && <div className="pixel-owner-card" key={visibleAuthor.id}>
-              {visibleAuthor.photoUrl
-                ? <img className="pixel-owner-avatar" src={visibleAuthor.photoUrl} alt="" />
+              {safePhotoUrl
+                 ? <img className="pixel-owner-avatar" src={safePhotoUrl} alt="" />
                 : <span className="pixel-owner-avatar pixel-owner-fallback">{authorLabel.slice(0, 1).toUpperCase()}</span>}
               <span className="pixel-owner-name">{authorLabel}</span>
               <span className="pixel-owner-balance" aria-hidden="true" />
@@ -415,13 +417,13 @@ export function BattleScreen() {
         <div className="profile-modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setInfoOpen(false); }}>
           <section className="profile-modal glass-panel" role="dialog" aria-modal="true" aria-label="Информация об игроке">
             <button className="profile-modal-close" onClick={() => setInfoOpen(false)} aria-label="Закрыть">×</button>
-            {visibleAuthor.photoUrl
-              ? <img className="profile-modal-avatar" src={visibleAuthor.photoUrl} alt="" />
+             {safePhotoUrl
+               ? <img className="profile-modal-avatar" src={safePhotoUrl} alt="" />
               : <span className="profile-modal-avatar profile-modal-fallback">{authorTitle.slice(0, 1).toUpperCase()}</span>}
             <div className="profile-modal-identity">
               <strong>{authorTitle}</strong>
-              {visibleAuthor.username
-                ? <a href={`https://t.me/${visibleAuthor.username}`} target="_blank" rel="noreferrer">{authorIdentity}</a>
+               {safeUsername
+                 ? <a href={`https://t.me/${safeUsername}`} target="_blank" rel="noreferrer">{authorIdentity}</a>
                 : <span>{authorIdentity}</span>}
             </div>
           </section>

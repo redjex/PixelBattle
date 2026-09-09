@@ -12,11 +12,14 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
     const telegram = window.Telegram?.WebApp;
     if (!telegram?.initData) return;
     const initData = telegram.initData;
-    const url = import.meta.env.VITE_WS_URL ?? 'ws://localhost:8080/ws';
+    const configuredUrl = import.meta.env.VITE_WS_URL;
+    const url = configuredUrl ?? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+    if (!/^wss?:\/\//.test(url) || (window.location.protocol === 'https:' && !url.startsWith('wss://'))) return;
 
     function connect() {
       if (disposed) return;
       const socket = new WebSocket(url);
+      const openedAt = Date.now();
       socketRef.current = socket;
       socket.onopen = () => {
         socket.send(JSON.stringify({ type: 'authenticate', initData }));
@@ -25,7 +28,14 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data) as Pixel & { type?: string };
-          if (message.type === 'pixel_placed') {
+          if (message.type === 'error') {
+            // Authentication failures are terminal for this captured initData.
+            const code = String((message as { code?: unknown }).code ?? '').toLowerCase();
+            if (code.includes('auth') || code.includes('telegram') || code.includes('expired') || code.includes('credential')) {
+              disposed = true;
+              socket.close();
+            }
+          } else if (message.type === 'pixel_placed') {
             onPixel(message);
             if (message.operationId) {
               const pending = pendingRef.current.get(message.operationId);
@@ -40,18 +50,24 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
           }
         } catch { /* Ignore malformed server messages. */ }
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
+        if (event.code === 4401) disposed = true;
+        if (Date.now() - openedAt >= 60000) reconnectAttemptRef.current = 0;
         setConnected(false);
         for (const pending of pendingRef.current.values()) {
           window.clearTimeout(pending.timer);
           pending.resolve(false);
         }
         pendingRef.current.clear();
-        reconnectRef.current = window.setTimeout(connect, 1500);
+        if (!disposed) {
+          const attempt = Math.min(6, reconnectAttemptRef.current++);
+          reconnectRef.current = window.setTimeout(connect, Math.min(30000, 1000 * 2 ** attempt));
+        }
       };
       socket.onerror = () => socket.close();
     }
 
+    const reconnectAttemptRef = { current: 0 };
     connect();
     return () => {
       disposed = true;

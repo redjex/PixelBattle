@@ -36,14 +36,34 @@ export type TelegramWebApp = {
   };
 };
 
-const adminIds = new Set([743086174, 6997207264]);
-
 export function getTelegramWebApp(): TelegramWebApp | null { return window.Telegram?.WebApp ?? null; }
 
-export function isTelegramAdmin(): boolean { return adminIds.has(window.Telegram?.WebApp?.initDataUnsafe?.user?.id ?? 0); }
+// Admin capabilities must be granted by the server after validating initData.
 
-export async function authenticateTelegram(initData: string): Promise<boolean> {
+export type AppAccess = {
+  testMode: boolean;
+  isAdmin: boolean;
+  accessAllowed: boolean;
+  online: number | null;
+};
+
+export async function fetchAppAccess(initData: string): Promise<AppAccess> {
+  const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
+  const response = await fetch(`${apiUrl}/api/boards/session`, {
+    cache: 'no-store',
+    headers: { 'X-Telegram-Init-Data': initData },
+  });
+  if (!response.ok) throw new Error(`Access request failed: ${response.status}`);
+  const payload = await response.json() as Partial<AppAccess>;
+  const testMode = payload.testMode === true;
+  const isAdmin = payload.isAdmin === true;
+  const online = typeof payload.online === 'number' && Number.isFinite(payload.online) ? Math.max(0, payload.online) : null;
+  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online };
+}
+
+export async function authenticateTelegram(initData: string): Promise<AppAccess | null> {
   const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
   const response = await fetch(`${apiUrl}/api/auth/telegram`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: initData }) });
-  return response.ok;
+  if (!response.ok) return null;
+  return fetchAppAccess(initData);
 }

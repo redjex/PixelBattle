@@ -21,11 +21,11 @@ type Hub struct {
 }
 
 type Client struct {
-	Conn *websocket.Conn
+	Conn   *websocket.Conn
 	UserID string
-	send chan []byte
-	done chan struct{}
-	once sync.Once
+	send   chan []byte
+	done   chan struct{}
+	once   sync.Once
 }
 
 func NewHub() *Hub { return &Hub{clients: make(map[*Client]struct{})} }
@@ -33,6 +33,16 @@ func NewHub() *Hub { return &Hub{clients: make(map[*Client]struct{})} }
 func (h *Hub) Add(conn *websocket.Conn, userID string) *Client {
 	client := &Client{Conn: conn, UserID: userID, send: make(chan []byte, clientSendBuffer), done: make(chan struct{})}
 	h.mu.Lock()
+	count := 0
+	for existing := range h.clients {
+		if existing.UserID == userID {
+			count++
+		}
+	}
+	if len(h.clients) >= 2000 || count >= 3 {
+		h.mu.Unlock()
+		return nil
+	}
 	h.clients[client] = struct{}{}
 	h.mu.Unlock()
 	go client.writePump(func() { h.Remove(client) })
@@ -57,6 +67,18 @@ func (h *Hub) Remove(client *Client) {
 		close(client.done)
 		_ = client.Conn.Close()
 	})
+}
+
+func (h *Hub) Close() {
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	for _, client := range clients {
+		h.Remove(client)
+	}
 }
 
 func (c *Client) SendJSON(value any) error {

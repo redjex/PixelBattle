@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"log"
 	"pixelbattle/realtime/internal/domain"
 	"time"
 )
 
-type Writer struct{ pool *pgxpool.Pool }
+type Writer struct {
+	pool  *pgxpool.Pool
+	lease *pgxpool.Conn
+}
 
 type UserStats struct {
 	PlacedPixels         int64 `json:"placedPixels"`
@@ -45,10 +49,54 @@ func NewWriter(ctx context.Context, dsn string) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return &Writer{pool: pool}, nil
 }
 
-func (w *Writer) Close() { w.pool.Close() }
+func (w *Writer) Close() {
+	if w.lease != nil {
+		_ = w.lease.Conn().Close(context.Background())
+		w.lease.Release()
+	}
+	w.pool.Close()
+}
+
+// In-memory versions and board state require exactly one active server.
+func (w *Writer) AcquireLease(ctx context.Context) error {
+	conn, err := w.pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	var locked bool
+	if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(706978, 1)`).Scan(&locked); err != nil || !locked {
+		conn.Release()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("another realtime server holds the board lease")
+	}
+	w.lease = conn
+	return nil
+}
+
+func (w *Writer) MonitorLease(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(time.Second):
+			check, cancel := context.WithTimeout(ctx, 3*time.Second)
+			err := w.lease.Conn().Ping(check)
+			cancel()
+			if err != nil {
+				return fmt.Errorf("board lease connection lost: %w", err)
+			}
+		}
+	}
+}
 
 func (w *Writer) Migrate(ctx context.Context) error {
 	_, err := w.pool.Exec(ctx, `
@@ -66,6 +114,8 @@ CREATE TABLE IF NOT EXISTS board_snapshots (
  board_id text PRIMARY KEY, version bigint NOT NULL DEFAULT 0,
  pixels jsonb NOT NULL, updated_at timestamptz NOT NULL
 );
+ALTER TABLE board_snapshots ADD COLUMN IF NOT EXISTS event_version bigint;
+ALTER TABLE board_pixels ADD COLUMN IF NOT EXISTS frozen_until timestamptz;
 CREATE TABLE IF NOT EXISTS board_settings (
  board_id text PRIMARY KEY, width integer NOT NULL, height integer NOT NULL,
  updated_at timestamptz NOT NULL
@@ -342,6 +392,71 @@ func (w *Writer) LoadSnapshot(ctx context.Context, boardID string) ([]domain.Boa
 	return pixels, nil
 }
 
+// A snapshot is a complete checkpoint (including clears and admin paint).
+// Overlay only events beyond its explicit watermark, never old board rows.
+func (w *Writer) RestoreBoard(ctx context.Context, boardID string) ([]domain.BoardPixel, int64, error) {
+	var raw []byte
+	var watermark *int64
+	err := w.pool.QueryRow(ctx, `SELECT pixels,event_version FROM board_snapshots WHERE board_id=$1`, boardID).Scan(&raw, &watermark)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, 0, err
+	}
+	var pixels []domain.BoardPixel
+	if err == nil {
+		if err := json.Unmarshal(raw, &pixels); err != nil {
+			return nil, 0, err
+		}
+		if watermark == nil {
+			// Legacy snapshots are authoritative as before. Overlaying rows without
+			// a checkpoint watermark could resurrect cleared or restored pixels.
+			log.Printf("WARNING: board %q uses a legacy snapshot without an event watermark; restoring snapshot only, later persisted placements may be absent", boardID)
+			var maximum int64
+			if err := w.pool.QueryRow(ctx, `SELECT COALESCE(MAX(version),0) FROM pixel_events WHERE board_id=$1`, boardID).Scan(&maximum); err != nil {
+				return nil, 0, err
+			}
+			for _, p := range pixels {
+				maximum = max(maximum, p.Version)
+			}
+			return pixels, maximum, nil
+		}
+	}
+	var floor int64
+	if watermark != nil {
+		floor = *watermark
+	}
+	cells := make(map[[2]int]domain.BoardPixel, len(pixels))
+	for _, pixel := range pixels {
+		cells[[2]int{pixel.X, pixel.Y}] = pixel
+	}
+	rows, err := w.pool.Query(ctx, `SELECT b.x,b.y,b.color,b.version,b.updated_by,COALESCE(p.display_name,''),COALESCE(p.username,''),COALESCE(p.photo_url,''),b.frozen_until FROM board_pixels b LEFT JOIN profiles p ON p.telegram_id=b.updated_by WHERE b.board_id=$1 AND b.version>$2`, boardID, floor)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p domain.BoardPixel
+		if err := rows.Scan(&p.X, &p.Y, &p.Color, &p.Version, &p.Author.ID, &p.Author.DisplayName, &p.Author.Username, &p.Author.PhotoURL, &p.FrozenUntil); err != nil {
+			return nil, 0, err
+		}
+		cells[[2]int{p.X, p.Y}] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	var maximum int64
+	if err := w.pool.QueryRow(ctx, `SELECT COALESCE(MAX(version),0) FROM pixel_events WHERE board_id=$1`, boardID).Scan(&maximum); err != nil {
+		return nil, 0, err
+	}
+	maximum = max(maximum, floor)
+	pixels = make([]domain.BoardPixel, 0, len(cells))
+	for _, p := range cells {
+		pixels = append(pixels, p)
+		maximum = max(maximum, p.Version)
+	}
+	return pixels, maximum, nil
+}
+
 func (w *Writer) UserStats(ctx context.Context, userID string) (UserStats, error) {
 	var stats UserStats
 	err := w.pool.QueryRow(ctx, `
@@ -397,15 +512,27 @@ ON CONFLICT(scope) DO UPDATE SET reset_at=EXCLUDED.reset_at`, scope)
 	return err
 }
 
-func (w *Writer) WriteSnapshot(ctx context.Context, boardID string, pixels []domain.BoardPixel) error {
+func (w *Writer) WriteSnapshot(ctx context.Context, boardID string, pixels []domain.BoardPixel, watermark int64, size BoardSize) error {
 	raw, err := json.Marshal(pixels)
 	if err != nil {
 		return err
 	}
-	_, err = w.pool.Exec(ctx, `INSERT INTO board_snapshots(board_id, version, pixels, updated_at)
-VALUES($1, COALESCE((SELECT version + 1 FROM board_snapshots WHERE board_id=$1), 1), $2, NOW())
-ON CONFLICT(board_id) DO UPDATE SET version=board_snapshots.version+1, pixels=EXCLUDED.pixels, updated_at=NOW()`, boardID, raw)
-	return err
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `INSERT INTO board_snapshots(board_id, version, pixels, updated_at,event_version)
+VALUES($1,1,$2,NOW(),$3)
+ON CONFLICT(board_id) DO UPDATE SET version=board_snapshots.version+1,pixels=EXCLUDED.pixels,updated_at=NOW(),event_version=EXCLUDED.event_version`, boardID, raw, watermark)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO board_settings(board_id,width,height,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(board_id) DO UPDATE SET width=EXCLUDED.width,height=EXCLUDED.height,updated_at=NOW()`, boardID, size.Width, size.Height)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (w *Writer) WriteBatch(ctx context.Context, events []domain.PixelEvent) error {
@@ -415,19 +542,23 @@ func (w *Writer) WriteBatch(ctx context.Context, events []domain.PixelEvent) err
 	}
 	defer tx.Rollback(ctx)
 	for _, event := range events {
+		tag, err := tx.Exec(ctx, `INSERT INTO pixel_events(event_id,operation_id,board_id,x,y,color,user_id,version,created_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, event.EventID, event.OperationID, event.BoardID, event.X, event.Y, event.Color, event.UserID, event.Version, event.CreatedAt)
+		if err != nil {
+			return err
+		}
+		// A duplicate must not mutate profiles or the materialized board either.
+		if tag.RowsAffected() == 0 {
+			continue
+		}
 		_, err = tx.Exec(ctx, `INSERT INTO profiles(telegram_id,display_name,username,photo_url,first_seen_at,updated_at)
 VALUES($1,$2,$3,$4,NOW(),NOW())
 ON CONFLICT(telegram_id) DO UPDATE SET display_name=EXCLUDED.display_name,username=EXCLUDED.username,photo_url=EXCLUDED.photo_url,updated_at=NOW()`, event.Author.ID, event.Author.DisplayName, event.Author.Username, event.Author.PhotoURL)
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO pixel_events(event_id,operation_id,board_id,x,y,color,user_id,version,created_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, event.EventID, event.OperationID, event.BoardID, event.X, event.Y, event.Color, event.UserID, event.Version, event.CreatedAt)
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO board_pixels(board_id,x,y,color,version,updated_by,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(board_id,x,y) DO UPDATE SET color=excluded.color,version=excluded.version,updated_by=excluded.updated_by,updated_at=excluded.updated_at WHERE board_pixels.version < excluded.version`, event.BoardID, event.X, event.Y, event.Color, event.Version, event.UserID, event.CreatedAt)
+		_, err = tx.Exec(ctx, `INSERT INTO board_pixels(board_id,x,y,color,version,updated_by,updated_at,frozen_until)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(board_id,x,y) DO UPDATE SET color=excluded.color,version=excluded.version,updated_by=excluded.updated_by,updated_at=excluded.updated_at,frozen_until=excluded.frozen_until WHERE board_pixels.version < excluded.version`, event.BoardID, event.X, event.Y, event.Color, event.Version, event.UserID, event.CreatedAt, event.FrozenUntil)
 		if err != nil {
 			return err
 		}
@@ -436,28 +567,56 @@ VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(board_id,x,y) DO UPDATE SET color=exclu
 }
 
 func RunMemoryBatcher(ctx context.Context, input <-chan domain.PixelEvent, writer *Writer) {
+	var write func(context.Context, []domain.PixelEvent) error
+	if writer != nil {
+		write = writer.WriteBatch
+	}
+	runMemoryBatcher(ctx, input, write)
+}
+
+func runMemoryBatcher(ctx context.Context, input <-chan domain.PixelEvent, write func(context.Context, []domain.PixelEvent) error) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	batch := make([]domain.PixelEvent, 0, 500)
-	flush := func() {
+	flush := func(flushCtx context.Context) bool {
 		if len(batch) > 0 {
-			if writer != nil {
-				_ = writer.WriteBatch(ctx, batch)
+			if write != nil {
+				for {
+					if err := write(flushCtx, batch); err == nil {
+						break
+					} else {
+						log.Printf("memory batch write failed; retaining %d events: %v", len(batch), err)
+					}
+					select {
+					case <-flushCtx.Done():
+						return false
+					case <-time.After(time.Second):
+					}
+				}
 			}
 			batch = batch[:0]
 		}
+		return true
 	}
 	for {
 		select {
-		case event := <-input:
+		case event, ok := <-input:
+			if !ok {
+				flush(ctx)
+				return
+			}
 			batch = append(batch, event)
 			if len(batch) >= 500 {
-				flush()
+				flush(ctx)
 			}
 		case <-ticker.C:
-			flush()
+			flush(ctx)
 		case <-ctx.Done():
-			flush()
+			finalCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if !flush(finalCtx) {
+				log.Printf("shutdown: %d in-memory events remain unpersisted", len(batch))
+			}
+			cancel()
 			return
 		}
 	}
