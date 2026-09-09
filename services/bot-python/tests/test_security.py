@@ -70,8 +70,13 @@ def test_inline_query_offers_shareable_map_button():
     method, payload = call.call_args.args
     assert method == "answerInlineQuery"
     assert payload["inline_query_id"] == "inline-1"
-    assert payload["results"][0]["title"] == "Открыть карту Pixel Battle"
-    button = payload["results"][0]["reply_markup"]["inline_keyboard"][0][0]
+    result = payload["results"][0]
+    assert result["type"] == "photo"
+    assert result["title"] == "PIXEL BATTLE"
+    assert result["photo_url"] == f"{bot.APP_URL}/assets/main-inline.jpg"
+    assert "caption" not in result
+    assert "description" not in result
+    button = result["reply_markup"]["inline_keyboard"][0][0]
     assert button == {"text": "Открыть карту", "url": bot.APP_LINK}
 
 

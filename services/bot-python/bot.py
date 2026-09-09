@@ -386,14 +386,13 @@ def map_markup() -> dict:
 
 def inline_map_result() -> dict[str, Any]:
     return {
-        "type": "article",
+        "type": "photo",
         "id": "open-pixel-battle-map",
-        "title": "Открыть карту Pixel Battle",
-        "description": "Отправить карту в чат",
-        "input_message_content": {
-            "message_text": "Pixel Battle — присоединяйся к битве!",
-            "disable_web_page_preview": True,
-        },
+        "photo_url": f"{APP_URL}/assets/main-inline.jpg",
+        "thumbnail_url": f"{APP_URL}/assets/main-inline.jpg",
+        "photo_width": 2160,
+        "photo_height": 1332,
+        "title": "PIXEL BATTLE",
         "reply_markup": {
             "inline_keyboard": [
                 [{"text": "Открыть карту", "url": APP_LINK}],
