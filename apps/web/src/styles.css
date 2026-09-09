@@ -104,6 +104,11 @@ button { color: inherit; }
 .menu-gifts:disabled { pointer-events:none; filter:grayscale(1); }
 .gifts-screen { font-family:"Minecraft Rus",monospace; color:#000; }
 .gifts-logo { position:absolute; z-index:1; top:calc(72px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:221px; max-width:calc(100% - 56px); height:auto; transform:translateX(-50%); image-rendering:pixelated; }
+.gifts-empty { position:absolute; z-index:1; top:50%; left:50%; width:calc(100% - 52px); transform:translate(-50%,-46%); display:flex; flex-direction:column; align-items:center; text-align:center; }
+.gifts-empty-icon { display:block; width:118px; height:118px; object-fit:contain; image-rendering:pixelated; }
+.gifts-empty p { font-family:"Minecraft Rus",monospace; font-weight:400; }
+.gifts-empty-title { margin:17px 0 0; color:#8a8a8a; font-size:16px; line-height:1.35; }
+.gifts-empty-hint { margin:17px 0 0; color:#000; font-size:13px; line-height:1.4; }
 .gifts-screen .stats-back { z-index:3; }
 .stats-content { position:absolute; inset:118px 20px 28px; overflow:auto; padding:18px 8px; }
 .stats-redesign { inset:0; padding:0 18px 150px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }

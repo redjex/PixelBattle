@@ -1,6 +1,6 @@
-type Props = { onBack: () => void };
+type Props = { onBack: () => void; prizes: unknown[] };
 
-const GIFT_ASSETS = ['/assets/gifts.png?v=2', '/assets/present.png?v=2'];
+const GIFT_ASSETS = ['/assets/gifts.png?v=2', '/assets/present.png?v=2', '/assets/emoji_gifts.png?v=1'];
 let giftAssetsPromise: Promise<void> | null = null;
 
 export function preloadGiftAssets() {
@@ -15,10 +15,17 @@ export function preloadGiftAssets() {
   return giftAssetsPromise;
 }
 
-export function GiftsScreen({ onBack }: Props) {
+export function GiftsScreen({ onBack, prizes }: Props) {
   return (
     <div className="gifts-screen">
       <img className="gifts-logo" src="/assets/present.png?v=2" alt="Трофеи" />
+      {prizes.length === 0 && (
+        <section className="gifts-empty" aria-label="Инвентарь трофеев пуст">
+          <img className="gifts-empty-icon" src="/assets/emoji_gifts.png?v=1" alt="" />
+          <p className="gifts-empty-title">В вашем инвентаре<br />еще нет предметов</p>
+          <p className="gifts-empty-hint">Вы можете получить трофеи,<br />просто играя в PixelBattle</p>
+        </section>
+      )}
       <button className="stats-back" onClick={onBack}>Назад</button>
     </div>
   );

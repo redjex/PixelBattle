@@ -45,6 +45,7 @@ export type AppAccess = {
   isAdmin: boolean;
   accessAllowed: boolean;
   online: number | null;
+  prizes: unknown[];
 };
 
 export async function fetchAppAccess(initData: string): Promise<AppAccess> {
@@ -58,7 +59,8 @@ export async function fetchAppAccess(initData: string): Promise<AppAccess> {
   const testMode = payload.testMode === true;
   const isAdmin = payload.isAdmin === true;
   const online = typeof payload.online === 'number' && Number.isFinite(payload.online) ? Math.max(0, payload.online) : null;
-  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online };
+  const prizes = Array.isArray(payload.prizes) ? payload.prizes : [];
+  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online, prizes };
 }
 
 export async function authenticateTelegram(initData: string): Promise<AppAccess | null> {

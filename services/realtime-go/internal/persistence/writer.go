@@ -125,9 +125,11 @@ CREATE TABLE IF NOT EXISTS profiles (
  display_name text NOT NULL,
  username text NOT NULL DEFAULT '',
  photo_url text NOT NULL DEFAULT '',
+ prizes jsonb NOT NULL DEFAULT '[]'::jsonb,
  first_seen_at timestamptz NOT NULL DEFAULT NOW(),
  updated_at timestamptz NOT NULL DEFAULT NOW()
 );
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS prizes jsonb NOT NULL DEFAULT '[]'::jsonb;
 CREATE TABLE IF NOT EXISTS board_clear_backups (
  backup_id text PRIMARY KEY,
  board_id text NOT NULL,
@@ -377,6 +379,15 @@ func (w *Writer) Profile(ctx context.Context, telegramID string) (domain.PixelAu
 	err := w.pool.QueryRow(ctx, `SELECT telegram_id,display_name,username,photo_url FROM profiles WHERE telegram_id=$1`, telegramID).
 		Scan(&profile.ID, &profile.DisplayName, &profile.Username, &profile.PhotoURL)
 	return profile, err
+}
+
+func (w *Writer) Prizes(ctx context.Context, telegramID string) (json.RawMessage, error) {
+	var prizes []byte
+	err := w.pool.QueryRow(ctx, `SELECT prizes FROM profiles WHERE telegram_id=$1`, telegramID).Scan(&prizes)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(prizes), nil
 }
 
 func (w *Writer) LoadSnapshot(ctx context.Context, boardID string) ([]domain.BoardPixel, error) {
