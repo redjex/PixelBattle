@@ -12,11 +12,10 @@ export function MainMenu({ onOpenMap, onOpenStats, onOpenGifts, maintenance, onl
       <div className="menu-actions">
         <div className="menu-shortcuts">
           <button className="menu-shortcut menu-shortcut-profile" onClick={onOpenStats} disabled={maintenance} aria-label="Открыть профиль">
-            <img src="/assets/profile.svg?v=2" alt="" />
             <span>Профиль</span>
           </button>
           <button className="menu-shortcut menu-shortcut-present" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
-            <img src="/assets/present.svg?v=2" alt="" />
+            <img className="menu-shortcut-crown" src="/assets/present.svg?v=2" alt="" />
             <span>Трофеи</span>
           </button>
         </div>

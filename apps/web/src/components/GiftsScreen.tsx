@@ -1,7 +1,7 @@
 type Props = { onBack: () => void; onOpenCatalog: () => void; prizes: unknown[] };
 type CatalogProps = { onBack: () => void };
 
-const GIFT_ASSETS = ['/assets/profile.svg?v=2', '/assets/present.svg?v=2', '/assets/present.png?v=2', '/assets/emoji_gifts.png?v=1'];
+const GIFT_ASSETS = ['/assets/present.svg?v=2', '/assets/present.png?v=2', '/assets/emoji_gifts.png?v=1'];
 let giftAssetsPromise: Promise<void> | null = null;
 
 export function preloadGiftAssets() {
