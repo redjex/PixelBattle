@@ -11,10 +11,10 @@ export function MainMenu({ onOpenMap, onOpenStats, onOpenGifts, maintenance, onl
       <img className="menu-logo" src="/assets/pixel_logo.png" alt="Pixel Battle" />
       <div className="menu-actions">
         <div className="menu-shortcuts">
-          <button className="menu-shortcut" onClick={onOpenStats} disabled={maintenance} aria-label="Открыть профиль">
+          <button className="menu-shortcut menu-shortcut-profile" onClick={onOpenStats} disabled={maintenance} aria-label="Открыть профиль">
             <img src="/assets/profile.svg?v=1" alt="" />
           </button>
-          <button className="menu-shortcut" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
+          <button className="menu-shortcut menu-shortcut-present" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
             <img src="/assets/present.svg?v=1" alt="" />
           </button>
         </div>

@@ -93,9 +93,11 @@ button { color: inherit; }
 .menu-button:disabled { cursor:not-allowed; pointer-events:none; filter:grayscale(1); }
 .menu-button-primary:disabled { color:#fff; background:#777; }
 .menu-button-primary { order:2; position:relative; z-index:2; color:#fff; background:#000; }
-.menu-shortcuts { position:relative; z-index:1; order:1; width:100%; max-width:326px; margin:0 auto -6px; display:grid; grid-template-columns:153fr 163fr; align-items:end; gap:8px; }
-.menu-shortcut { min-width:0; padding:0; border:0; display:block; background:transparent; cursor:pointer; transition:transform .12s steps(2,end),filter .12s steps(2,end); }
-.menu-shortcut img { display:block; width:100%; height:auto; image-rendering:pixelated; }
+.menu-shortcuts { position:relative; z-index:1; order:1; width:100%; height:68px; margin:0 auto -6px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; gap:8px; }
+.menu-shortcut { position:relative; min-width:0; height:68px; padding:0; border:0; display:block; background:transparent; cursor:pointer; transition:transform .12s steps(2,end),filter .12s steps(2,end); }
+.menu-shortcut img { position:absolute; right:0; bottom:0; left:0; display:block; width:100%; object-fit:fill; image-rendering:pixelated; }
+.menu-shortcut-profile img { height:52px; }
+.menu-shortcut-present img { height:68px; }
 .menu-shortcut:active { transform:translateY(3px); filter:brightness(.86); }
 .menu-shortcut:disabled { pointer-events:none; filter:grayscale(1); }
 .gifts-screen, .gifts-catalog-screen { font-family:"Minecraft Rus",monospace; color:#000; }
