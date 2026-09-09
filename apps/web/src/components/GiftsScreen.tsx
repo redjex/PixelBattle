@@ -5,10 +5,10 @@ let giftAssetsPromise: Promise<void> | null = null;
 
 export function preloadGiftAssets() {
   if (!giftAssetsPromise) {
-    giftAssetsPromise = Promise.all(GIFT_ASSETS.map((src) => new Promise<void>((resolve, reject) => {
+    giftAssetsPromise = Promise.all(GIFT_ASSETS.map((src) => new Promise<void>((resolve) => {
       const image = new Image();
       image.onload = () => resolve();
-      image.onerror = () => reject(new Error(`Failed to preload ${src}`));
+      image.onerror = () => resolve();
       image.src = src;
     }))).then(() => undefined);
   }
