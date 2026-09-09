@@ -1,15 +1,18 @@
 import { ParallaxBackground } from './ParallaxBackground';
 import { SeasonStatus } from './SeasonStatus';
 
-type Props = { onOpenMap: () => void; onOpenStats: () => void; maintenance: boolean; online: number | null };
+type Props = { onOpenMap: () => void; onOpenStats: () => void; onOpenGifts: () => void; maintenance: boolean; online: number | null };
 
-export function MainMenu({ onOpenMap, onOpenStats, maintenance, online }: Props) {
+export function MainMenu({ onOpenMap, onOpenStats, onOpenGifts, maintenance, online }: Props) {
   return (
     <div className="main-menu" data-node-id="1878:25595">
       <ParallaxBackground />
       <SeasonStatus online={online} showOnline />
       <img className="menu-logo" src="/assets/pixel_logo.png" alt="Pixel Battle" />
       <div className="menu-actions">
+        <button className="menu-gifts" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
+          <img src="/assets/gifts.png" alt="" />
+        </button>
         <button className="menu-button menu-button-primary" onClick={onOpenMap} disabled={maintenance}>{maintenance ? 'Тех. обслуживание' : 'Открыть карту'}</button>
         <button className="menu-button menu-button-secondary" onClick={onOpenStats} disabled={maintenance}><span>Статистика</span></button>
       </div>

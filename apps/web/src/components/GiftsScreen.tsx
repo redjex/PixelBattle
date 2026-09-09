@@ -1,0 +1,25 @@
+type Props = { onBack: () => void };
+
+const GIFT_ASSETS = ['/assets/gifts.png', '/assets/present.png'];
+let giftAssetsPromise: Promise<void> | null = null;
+
+export function preloadGiftAssets() {
+  if (!giftAssetsPromise) {
+    giftAssetsPromise = Promise.all(GIFT_ASSETS.map((src) => new Promise<void>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`Failed to preload ${src}`));
+      image.src = src;
+    }))).then(() => undefined);
+  }
+  return giftAssetsPromise;
+}
+
+export function GiftsScreen({ onBack }: Props) {
+  return (
+    <div className="gifts-screen">
+      <img className="gifts-logo" src="/assets/present.png" alt="Трофеи" />
+      <button className="stats-back" onClick={onBack}>Назад</button>
+    </div>
+  );
+}
