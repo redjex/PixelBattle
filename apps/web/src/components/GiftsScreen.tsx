@@ -1,4 +1,5 @@
-type Props = { onBack: () => void; prizes: unknown[] };
+type Props = { onBack: () => void; onOpenCatalog: () => void; prizes: unknown[] };
+type CatalogProps = { onBack: () => void };
 
 const GIFT_ASSETS = ['/assets/gifts.png?v=2', '/assets/present.png?v=2', '/assets/emoji_gifts.png?v=1'];
 let giftAssetsPromise: Promise<void> | null = null;
@@ -15,7 +16,7 @@ export function preloadGiftAssets() {
   return giftAssetsPromise;
 }
 
-export function GiftsScreen({ onBack, prizes }: Props) {
+export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
   return (
     <div className="gifts-screen">
       <img className="gifts-logo" src="/assets/present.png?v=2" alt="Трофеи" />
@@ -26,6 +27,16 @@ export function GiftsScreen({ onBack, prizes }: Props) {
           <p className="gifts-empty-hint">Вы можете получить трофеи,<br />просто играя в PixelBattle</p>
         </section>
       )}
+      <button className="gifts-catalog-link" onClick={onOpenCatalog}>Полный список доступных наград</button>
+      <button className="stats-back" onClick={onBack}>Назад</button>
+    </div>
+  );
+}
+
+export function GiftsCatalogScreen({ onBack }: CatalogProps) {
+  return (
+    <div className="gifts-catalog-screen">
+      <img className="gifts-logo" src="/assets/present.png?v=2" alt="Доступные награды" />
       <button className="stats-back" onClick={onBack}>Назад</button>
     </div>
   );

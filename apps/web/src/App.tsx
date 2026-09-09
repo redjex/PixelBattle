@@ -10,13 +10,13 @@ import { preloadStatistics } from './statisticsCache';
 import { QuestNotifications } from './components/QuestNotifications';
 import { preloadParallaxBackground } from './components/ParallaxBackground';
 import { preloadRatingRewards, RatingScreen } from './components/RatingScreen';
-import { GiftsScreen, preloadGiftAssets } from './components/GiftsScreen';
+import { GiftsCatalogScreen, GiftsScreen, preloadGiftAssets } from './components/GiftsScreen';
 
 export function App() {
   const [loading, setLoading] = useState(true);
   const [authState, setAuthState] = useState<'checking' | 'denied' | 'invalid' | 'authorized'>('checking');
   const [appAccess, setAppAccess] = useState<AppAccess | null>(null);
-  const [screen, setScreen] = useState<'menu' | 'map' | 'stats' | 'rating' | 'agreement' | 'gifts'>('menu');
+  const [screen, setScreen] = useState<'menu' | 'map' | 'stats' | 'rating' | 'agreement' | 'gifts' | 'gifts-catalog'>('menu');
   const maintenanceMode = appAccess?.accessAllowed === false;
 
   useEffect(() => {
@@ -80,7 +80,7 @@ export function App() {
       backButton.hide();
       return;
     }
-    const handleBack = () => setScreen(screen === 'agreement' || screen === 'rating' ? 'stats' : 'menu');
+    const handleBack = () => setScreen(screen === 'agreement' || screen === 'rating' ? 'stats' : screen === 'gifts-catalog' ? 'gifts' : 'menu');
     backButton.onClick(handleBack);
     backButton.show();
     return () => {
@@ -171,7 +171,7 @@ export function App() {
 
   if (authState !== 'authorized') return <main className="app-shell"><section className="phone-frame"><LoadingScreen message={authState === 'invalid' ? 'Ошибка проверки Telegram' : 'Откройте через Telegram'} /></section></main>;
   return <main className="app-shell"><section className="phone-frame" aria-label="Pixel Battle">
-    {loading ? <LoadingScreen /> : maintenanceMode || screen === 'menu' ? <MainMenu maintenance={maintenanceMode} online={appAccess?.online ?? null} onOpenMap={() => { if (!maintenanceMode) setScreen('map'); }} onOpenStats={() => { if (!maintenanceMode) setScreen('stats'); }} onOpenGifts={() => { if (!maintenanceMode) setScreen('gifts'); }} /> : screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} onBack={() => setScreen('menu')} /> : <BattleScreen />}
+    {loading ? <LoadingScreen /> : maintenanceMode || screen === 'menu' ? <MainMenu maintenance={maintenanceMode} online={appAccess?.online ?? null} onOpenMap={() => { if (!maintenanceMode) setScreen('map'); }} onOpenStats={() => { if (!maintenanceMode) setScreen('stats'); }} onOpenGifts={() => { if (!maintenanceMode) setScreen('gifts'); }} /> : screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} onOpenCatalog={() => setScreen('gifts-catalog')} onBack={() => setScreen('menu')} /> : screen === 'gifts-catalog' ? <GiftsCatalogScreen onBack={() => setScreen('gifts')} /> : <BattleScreen />}
     {!loading && !maintenanceMode && <QuestNotifications />}
   </section></main>;
 }
