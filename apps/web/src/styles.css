@@ -220,11 +220,9 @@ button { color: inherit; }
 .brand-pill { position:relative; display:grid; place-items:center; font-size:15px; }
 .online-pill { display:flex; align-items:center; justify-content:center; gap:7px; font-family:"Minecraft Rus",monospace; font-size:14px; font-variant-numeric:tabular-nums; }
 .online-dot { width:8px; height:8px; flex:0 0 auto; border:2px solid #000; border-radius:50%; background:#31e52d; box-shadow:0 0 0 1px #fff; }
-.main-menu .brand-pill { animation:status-pill-fly-left .58s cubic-bezier(.2,1.35,.35,1) .12s both; }
-.main-menu .online-pill { animation:status-pill-fly-right .58s cubic-bezier(.2,1.35,.35,1) .2s both; }
-@keyframes status-pill-fly-left { from { opacity:0; transform:translate(-64px,-18px) scale(.72); } to { opacity:1; transform:translate(0,0) scale(1); } }
-@keyframes status-pill-fly-right { from { opacity:0; transform:translate(64px,-18px) scale(.72); } to { opacity:1; transform:translate(0,0) scale(1); } }
-@media (prefers-reduced-motion:reduce) { .main-menu .brand-pill, .main-menu .online-pill { animation:none; } }
+.main-menu .app-top-status { animation:menu-status-enter .65s cubic-bezier(.22,1,.36,1) both; }
+@keyframes menu-status-enter { from { opacity:0; transform:translate(-50%,-18px); } to { opacity:1; transform:translate(-50%,0); } }
+@media (prefers-reduced-motion:reduce) { .main-menu .app-top-status { animation:none; } }
 
 .zoom-controls { position:absolute; z-index:3; left:max(16px, env(safe-area-inset-left)); top:50%; transform:translateY(-50%); display:grid; gap:8px; }
 .glass-button { width:44px; height:44px; padding:0; border:0; border-radius:50%; cursor:pointer; display:grid; place-items:center; }
