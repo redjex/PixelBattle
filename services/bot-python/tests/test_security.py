@@ -65,7 +65,9 @@ def test_refresh_throttled_before_render():
 
 
 def test_inline_query_offers_shareable_map_button():
-    with patch.object(bot, "call") as call:
+    with patch.object(bot.time, "time", return_value=100), patch.object(
+        bot, "call"
+    ) as call:
         bot.handle_inline_query({"id": "inline-1", "query": ""})
     method, payload = call.call_args.args
     assert method == "answerInlineQuery"
@@ -73,7 +75,8 @@ def test_inline_query_offers_shareable_map_button():
     result = payload["results"][0]
     assert result["type"] == "photo"
     assert result["title"] == "PIXEL BATTLE"
-    assert result["photo_url"] == f"{bot.APP_URL}/assets/main-inline.jpg"
+    assert result["id"] == "pixel-battle-map-20"
+    assert result["photo_url"] == f"{bot.APP_URL}/inline-map.jpg?v=20"
     assert "caption" not in result
     assert "description" not in result
     button = result["reply_markup"]["inline_keyboard"][0][0]

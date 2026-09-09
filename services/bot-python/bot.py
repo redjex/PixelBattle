@@ -163,7 +163,7 @@ def send_welcome(chat_id: int) -> None:
         {
             "chat_id": chat_id,
             "photo": f"{APP_URL}/assets/main.png",
-            "caption": "Pixel Battle — присоединяйся к битве!",
+            "caption": "Присоединяйся к битве!",
             "reply_markup": {
                 "inline_keyboard": [
                     [{"text": "Открыть Pixel Battle", "web_app": {"url": APP_URL}}]
@@ -188,7 +188,7 @@ def send_welcome(chat_id: int) -> None:
         chat_id,
         f"{APP_URL}/assets/main.png",
         "main.png",
-        "Pixel Battle — присоединяйся к битве!",
+        "Присоединяйся к битве!",
         markup,
     )
 
@@ -385,13 +385,15 @@ def map_markup() -> dict:
 
 
 def inline_map_result() -> dict[str, Any]:
+    image_version = int(time.time() // 5)
+    image_url = f"{APP_URL}/inline-map.jpg?v={image_version}"
     return {
         "type": "photo",
-        "id": "open-pixel-battle-map",
-        "photo_url": f"{APP_URL}/assets/main-inline.jpg",
-        "thumbnail_url": f"{APP_URL}/assets/main-inline.jpg",
-        "photo_width": 2160,
-        "photo_height": 1332,
+        "id": f"pixel-battle-map-{image_version}",
+        "photo_url": image_url,
+        "thumbnail_url": image_url,
+        "photo_width": 600,
+        "photo_height": 600,
         "title": "PIXEL BATTLE",
         "reply_markup": {
             "inline_keyboard": [
@@ -410,7 +412,7 @@ def handle_inline_query(inline_query: dict[str, Any]) -> None:
         {
             "inline_query_id": inline_query_id,
             "results": [inline_map_result()],
-            "cache_time": 5,
+            "cache_time": 0,
             "is_personal": False,
         },
     )

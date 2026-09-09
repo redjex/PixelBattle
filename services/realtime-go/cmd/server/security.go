@@ -169,7 +169,7 @@ func peerIP(r *http.Request) string {
 
 func allowedMethods(path string) string {
 	switch path {
-	case "/health", "/ws", "/api/boards/main", "/api/boards/session", "/api/boards/main/stats", "/api/profiles/me", "/api/boards/main/image", "/api/admin/stats":
+	case "/health", "/inline-map.jpg", "/ws", "/api/boards/main", "/api/boards/session", "/api/boards/main/stats", "/api/profiles/me", "/api/boards/main/image", "/api/admin/stats":
 		return "GET"
 	case "/api/boards/main/rewards":
 		return "GET, POST"

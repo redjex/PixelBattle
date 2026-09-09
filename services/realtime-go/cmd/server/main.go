@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"log"
 	"net/http"
@@ -60,6 +61,11 @@ func main() {
 	boardWidth.Store(defaultBoardSize)
 	boardHeight.Store(defaultBoardSize)
 	boardCache := &boardSnapshotCache{}
+	inlineImageCache := struct {
+		sync.Mutex
+		data      []byte
+		expiresAt time.Time
+	}{}
 	adminAPIToken := env("ADMIN_API_TOKEN", "")
 	requestLimits := &rateLimiter{}
 	socketLimits := &connectionLimits{}
@@ -519,36 +525,7 @@ func main() {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
-		width, height := int(boardWidth.Load()), int(boardHeight.Load())
-		const outputSize = 600
-		canvas := image.NewRGBA(image.Rect(0, 0, outputSize, outputSize))
-		for y := 0; y < outputSize; y++ {
-			for x := 0; x < outputSize; x++ {
-				canvas.Set(x, y, color.White)
-			}
-		}
-		for _, pixel := range boardStore.Snapshot("main") {
-			if pixel.X < 0 || pixel.Y < 0 || pixel.X >= width || pixel.Y >= height {
-				continue
-			}
-			cellW := outputSize / width
-			cellH := outputSize / height
-			if cellW < 1 {
-				cellW = 1
-			}
-			if cellH < 1 {
-				cellH = 1
-			}
-			parsed := color.RGBA{A: 255}
-			if _, err := fmt.Sscanf(pixel.Color, "#%02x%02x%02x", &parsed.R, &parsed.G, &parsed.B); err != nil {
-				continue
-			}
-			for y := pixel.Y * cellH; y < (pixel.Y+1)*cellH && y < outputSize; y++ {
-				for x := pixel.X * cellW; x < (pixel.X+1)*cellW && x < outputSize; x++ {
-					canvas.Set(x, y, parsed)
-				}
-			}
-		}
+		canvas := renderMapCanvas(int(boardWidth.Load()), int(boardHeight.Load()), boardStore.Snapshot("main"))
 		var output bytes.Buffer
 		if err := png.Encode(&output, canvas); err != nil {
 			http.Error(w, "failed to render map", http.StatusInternalServerError)
@@ -556,6 +533,26 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(output.Bytes())
+	})
+	http.HandleFunc("/inline-map.jpg", func(w http.ResponseWriter, _ *http.Request) {
+		inlineImageCache.Lock()
+		defer inlineImageCache.Unlock()
+		if time.Now().After(inlineImageCache.expiresAt) || len(inlineImageCache.data) == 0 {
+			boardMu.Lock()
+			canvas := renderMapCanvas(int(boardWidth.Load()), int(boardHeight.Load()), boardStore.Snapshot("main"))
+			boardMu.Unlock()
+			var output bytes.Buffer
+			if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: 90}); err != nil {
+				http.Error(w, "failed to render map", http.StatusInternalServerError)
+				return
+			}
+			inlineImageCache.data = output.Bytes()
+			inlineImageCache.expiresAt = time.Now().Add(2 * time.Second)
+		}
+		w.Header().Set("Cache-Control", "public, max-age=2")
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Content-Length", strconv.Itoa(len(inlineImageCache.data)))
+		_, _ = w.Write(inlineImageCache.data)
 	})
 	http.HandleFunc("/api/admin/boards/main/size", func(w http.ResponseWriter, r *http.Request) {
 		boardMu.Lock()
@@ -1153,6 +1150,40 @@ func profileFromTelegram(user auth.TelegramUser) domain.PixelAuthor {
 	}
 	return domain.PixelAuthor{ID: strconv.FormatInt(user.ID, 10), DisplayName: displayName, Username: user.Username, PhotoURL: user.PhotoURL}
 }
+
+func renderMapCanvas(width, height int, pixels []domain.BoardPixel) *image.RGBA {
+	const outputSize = 600
+	canvas := image.NewRGBA(image.Rect(0, 0, outputSize, outputSize))
+	for y := 0; y < outputSize; y++ {
+		for x := 0; x < outputSize; x++ {
+			canvas.Set(x, y, color.White)
+		}
+	}
+	cellW := outputSize / width
+	cellH := outputSize / height
+	if cellW < 1 {
+		cellW = 1
+	}
+	if cellH < 1 {
+		cellH = 1
+	}
+	for _, pixel := range pixels {
+		if pixel.X < 0 || pixel.Y < 0 || pixel.X >= width || pixel.Y >= height {
+			continue
+		}
+		parsed := color.RGBA{A: 255}
+		if _, err := fmt.Sscanf(pixel.Color, "#%02x%02x%02x", &parsed.R, &parsed.G, &parsed.B); err != nil {
+			continue
+		}
+		for y := pixel.Y * cellH; y < (pixel.Y+1)*cellH && y < outputSize; y++ {
+			for x := pixel.X * cellW; x < (pixel.X+1)*cellW && x < outputSize; x++ {
+				canvas.Set(x, y, parsed)
+			}
+		}
+	}
+	return canvas
+}
+
 func telegramUserFromRequest(r *http.Request) (auth.TelegramUser, error) {
 	if user, ok := r.Context().Value(telegramUserKey{}).(auth.TelegramUser); ok {
 		return user, nil
