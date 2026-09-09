@@ -384,6 +384,39 @@ def map_markup() -> dict:
     }
 
 
+def inline_map_result() -> dict[str, Any]:
+    return {
+        "type": "article",
+        "id": "open-pixel-battle-map",
+        "title": "Открыть карту Pixel Battle",
+        "description": "Отправить карту в чат",
+        "input_message_content": {
+            "message_text": "Pixel Battle — присоединяйся к битве!",
+            "disable_web_page_preview": True,
+        },
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "Открыть карту", "url": APP_LINK}],
+            ]
+        },
+    }
+
+
+def handle_inline_query(inline_query: dict[str, Any]) -> None:
+    inline_query_id = inline_query.get("id")
+    if not inline_query_id:
+        return
+    call(
+        "answerInlineQuery",
+        {
+            "inline_query_id": inline_query_id,
+            "results": [inline_map_result()],
+            "cache_time": 5,
+            "is_personal": False,
+        },
+    )
+
+
 def delete_message(chat_id: int, message_id: int) -> None:
     try:
         call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
@@ -1160,8 +1193,7 @@ def handle_message(message: dict[str, Any]) -> None:
         return
     command = text.split()[0] if text.split() else ""
     base_command = command.split("@", 1)[0].lower()
-    # Everyone may request the current map; management commands stay admin-only.
-    if user_id not in ADMIN_IDS and base_command not in {"/start", "/map"}:
+    if user_id not in ADMIN_IDS and base_command != "/start":
         return
     pending_key = (user_id, chat_id)
     if (
@@ -1205,7 +1237,6 @@ def handle_message(message: dict[str, Any]) -> None:
     if base_command in {
         "/start",
         "/app",
-        "/map",
         "/admin",
         "/pause",
         "/resume",
@@ -1215,19 +1246,6 @@ def handle_message(message: dict[str, Any]) -> None:
         pending_actions.pop(pending_key, None)
     if text.startswith("/start") or text == "/app":
         send_welcome(chat_id)
-    elif base_command == "/map":
-        if chat.get("type") == "private" and user_id in ADMIN_IDS:
-            sent = send_map_to_saved_groups()
-            send_message(chat_id, f"Карта отправлена в групп: {sent}.")
-            return
-        if chat.get("type") in {"group", "supergroup"}:
-            database.sadd(MAP_CHATS_KEY, str(chat_id))
-        if chat.get("type") in {"group", "supergroup"} and message.get("message_id"):
-            delete_message(chat_id, int(message["message_id"]))
-        try:
-            send_map(chat_id)
-        except requests.RequestException:
-            send_message(chat_id, "Не удалось получить карту с сервера.")
     elif text.startswith("/admin"):
         if user_id in ADMIN_IDS:
             admin_menu(chat_id)
@@ -1283,13 +1301,15 @@ def main() -> None:
                 {
                     "offset": offset,
                     "timeout": 25,
-                    "allowed_updates": ["message", "callback_query"],
+                    "allowed_updates": ["message", "callback_query", "inline_query"],
                 },
             )
             for update in result.get("result", []):
                 offset = update["update_id"] + 1
                 if "callback_query" in update:
                     handle_callback(update["callback_query"])
+                elif "inline_query" in update:
+                    handle_inline_query(update["inline_query"])
                 elif "message" in update:
                     handle_message(update["message"])
         except Exception:

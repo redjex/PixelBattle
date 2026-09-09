@@ -64,6 +64,33 @@ def test_refresh_throttled_before_render():
         render.assert_not_called()
 
 
+def test_inline_query_offers_shareable_map_button():
+    with patch.object(bot, "call") as call:
+        bot.handle_inline_query({"id": "inline-1", "query": ""})
+    method, payload = call.call_args.args
+    assert method == "answerInlineQuery"
+    assert payload["inline_query_id"] == "inline-1"
+    assert payload["results"][0]["title"] == "Открыть карту Pixel Battle"
+    button = payload["results"][0]["reply_markup"]["inline_keyboard"][0][0]
+    assert button == {"text": "Открыть карту", "url": bot.APP_LINK}
+
+
+def test_map_command_is_not_available_to_players():
+    with patch.object(bot, "send_map") as send_map, patch.object(
+        bot, "send_message"
+    ) as send_message:
+        bot.handle_message(
+            {
+                "message_id": 7,
+                "from": {"id": 789},
+                "chat": {"id": -1001, "type": "supergroup"},
+                "text": "/map",
+            }
+        )
+    send_map.assert_not_called()
+    send_message.assert_not_called()
+
+
 def test_non_admin_callback_cannot_mutate():
     with patch.object(bot, "call"), patch.object(
         bot, "set_game_paused"
