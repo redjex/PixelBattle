@@ -11,7 +11,7 @@ export function MainMenu({ onOpenMap, onOpenStats, onOpenGifts, maintenance, onl
       <img className="menu-logo" src="/assets/pixel_logo.png" alt="Pixel Battle" />
       <div className="menu-actions">
         <button className="menu-gifts" onClick={onOpenGifts} disabled={maintenance} aria-label="Открыть трофеи">
-          <img src="/assets/gifts.png" alt="" />
+          <img src="/assets/gifts.png?v=2" alt="" />
         </button>
         <button className="menu-button menu-button-primary" onClick={onOpenMap} disabled={maintenance}>{maintenance ? 'Тех. обслуживание' : 'Открыть карту'}</button>
         <button className="menu-button menu-button-secondary" onClick={onOpenStats} disabled={maintenance}><span>Статистика</span></button>
