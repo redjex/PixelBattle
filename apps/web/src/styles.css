@@ -163,14 +163,14 @@ button { color: inherit; }
 .quest { position:relative; width:100%; min-height:38px; padding:5px 0; display:flex; justify-content:space-between; align-items:center; background:transparent; font-family:inherit; font-size:14px; text-align:left; }
 .quest strong { font-weight:400; white-space:nowrap; }
 .quest.done::after { content:""; position:absolute; z-index:1; left:-6px; right:-6px; top:50%; height:3px; background:#000; transform:translateY(-50%); pointer-events:none; }
-.quest-notification-layer { position:fixed; z-index:30; top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 28px); left:max(var(--tg-content-safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px)); right:max(var(--tg-content-safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px)); display:flex; justify-content:center; padding:0 14px; pointer-events:none; }
+.quest-notification-layer { position:fixed; z-index:30; top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 84px); left:max(var(--tg-content-safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px)); right:max(var(--tg-content-safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px)); display:flex; justify-content:center; padding:0 14px; pointer-events:none; }
 .quest-notification { position:relative; width:min(310px, 100%); height:56px; padding:9px 14px 8px; display:flex; box-sizing:border-box; align-items:center; justify-content:center; color:#000; font-family:"Minecraft Rus",monospace; text-align:center; image-rendering:pixelated; animation:quest-notice-life 4.1s cubic-bezier(.22,1,.36,1) both; }
 .quest-notification-shape { position:absolute; z-index:0; left:0; top:-16px; width:100%; height:72px; overflow:visible; }
 .quest-notification-shape path { fill:#fff; stroke:#000; stroke-width:3px; stroke-linejoin:round; }
 .quest-notification-text { position:relative; z-index:1; max-width:100%; font-size:13px; line-height:1.2; }
 .quest-notification-text::after { content:""; position:absolute; z-index:1; left:-4px; top:50%; width:calc(100% + 8px); height:3px; background:#000; transform:translateY(-50%) scaleX(0); transform-origin:left center; animation:quest-notice-strike .525s cubic-bezier(.22,1,.36,1) 1.25s forwards; }
 .quest-notification.no-strike .quest-notification-text::after { display:none; animation:none; }
-@media (max-width:600px), (pointer:coarse) { .quest-notification-layer { top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 50px); } }
+@media (max-width:600px), (pointer:coarse) { .quest-notification-layer { top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 84px); } }
 @keyframes quest-notice-life { 0% { opacity:0; transform:translateY(-28px) scale(.96); } 10%,82% { opacity:1; transform:translateY(0) scale(1); } 100% { opacity:0; transform:translateY(-18px) scale(.98); } }
 @keyframes quest-notice-strike { to { transform:translateY(-50%) scaleX(1); } }
 @media (prefers-reduced-motion:reduce) { .quest-notification { animation:quest-notice-fade 4.1s ease both; } .quest-notification-text::after { animation:quest-notice-strike .15s linear 1.25s forwards; } }
