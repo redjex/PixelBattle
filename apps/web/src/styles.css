@@ -169,6 +169,7 @@ button { color: inherit; }
 .quest-notification-shape path { fill:#fff; stroke:#000; stroke-width:3px; stroke-linejoin:round; }
 .quest-notification-text { position:relative; z-index:1; max-width:100%; font-size:13px; line-height:1.2; }
 .quest-notification-text::after { content:""; position:absolute; z-index:1; left:-4px; top:50%; width:calc(100% + 8px); height:3px; background:#000; transform:translateY(-50%) scaleX(0); transform-origin:left center; animation:quest-notice-strike .525s cubic-bezier(.22,1,.36,1) 1.25s forwards; }
+.quest-notification.no-strike .quest-notification-text::after { display:none; animation:none; }
 @media (max-width:600px), (pointer:coarse) { .quest-notification-layer { top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 50px); } }
 @keyframes quest-notice-life { 0% { opacity:0; transform:translateY(-28px) scale(.96); } 10%,82% { opacity:1; transform:translateY(0) scale(1); } 100% { opacity:0; transform:translateY(-18px) scale(.98); } }
 @keyframes quest-notice-strike { to { transform:translateY(-50%) scaleX(1); } }

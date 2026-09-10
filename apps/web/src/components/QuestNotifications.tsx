@@ -3,7 +3,7 @@ import { currentDailyKey, getDailyQuests } from '../dailyQuests';
 import { getPlayerLevelProgress } from '../playerLevel';
 import { getCachedStatistics, refreshStatistics } from '../statisticsCache';
 
-type QuestNotice = { id: string; label: string };
+type QuestNotice = { id: string; label: string; strike: boolean };
 type TrophyAwardedDetail = { eventId: string; userId: string; nickname: string };
 
 export function QuestNotifications() {
@@ -27,11 +27,11 @@ export function QuestNotifications() {
         const playerLevel = getPlayerLevelProgress(stats.placedPixels).level;
         const doneNow = new Set(quests.filter((quest) => quest.done).map((quest) => quest.id));
         if (initializedRef.current && mayNotify) {
-          const newNotices = quests
+          const newNotices: QuestNotice[] = quests
             .filter((quest) => quest.done && !completedRef.current.has(quest.id))
-            .map(({ id, label }) => ({ id, label }));
+            .map(({ id, label }) => ({ id, label, strike: true }));
           if (playerLevelRef.current !== null && playerLevel > playerLevelRef.current) {
-            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel} уровня!` });
+            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel} уровня!`, strike: false });
           }
           if (newNotices.length) setNotices((current) => [...current, ...newNotices]);
         }
@@ -77,7 +77,7 @@ export function QuestNotifications() {
         : `Игроку ${nickname || 'участнику'} выпал трофей!`;
       setNotices((current) => [
         ...current,
-        { id: `trophy-${detail.eventId}`, label },
+        { id: `trophy-${detail.eventId}`, label, strike: false },
       ]);
     };
     window.addEventListener('pixelbattle:placement-accepted', handlePlacement);
@@ -112,7 +112,7 @@ export function QuestNotifications() {
   if (!active) return null;
   return (
     <div className="quest-notification-layer" aria-live="polite" aria-atomic="true">
-      <section className="quest-notification" key={active.id}>
+      <section className={`quest-notification${active.strike ? '' : ' no-strike'}`} key={active.id}>
         <svg className="quest-notification-shape" viewBox="0 0 310 72" preserveAspectRatio="none" aria-hidden="true">
           <path
             d="M7 16H24V9C24 4.5 27 2 31 2C33.5 2 35.5 3.2 38 5L66 16H303C306.5 16 308 18.5 308 22V65C308 68.5 306 70 302 70H8C4 70 2 68 2 64V22C2 18 4 16 7 16Z"
