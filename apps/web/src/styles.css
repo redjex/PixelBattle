@@ -134,6 +134,7 @@ button { color: inherit; }
 .trophy-part-left { left:-2.6%; top:-2.6%; width:58.7%; height:105.2%; }
 .trophy-caption { margin-top:6px; display:flex; flex-direction:column; align-items:center; font-family:"Minecraft Rus",monospace; font-weight:400; line-height:15px; white-space:nowrap; }
 .trophy-name { max-width:145px; color:#008efb; font-size:14px; line-height:15px; white-space:normal; overflow-wrap:anywhere; }
+.trophy-name-numbered > span { display:block; white-space:nowrap; }
 .trophy-progress { color:#000; font-size:10px; }
 .stats-content { position:absolute; inset:118px 20px 28px; overflow:auto; padding:18px 8px; }
 .stats-redesign { inset:0; padding:0 18px 150px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }

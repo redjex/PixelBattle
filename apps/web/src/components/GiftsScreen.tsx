@@ -146,6 +146,17 @@ function FramedTrophyPreview({ image, title }: { image: string; title: string })
   );
 }
 
+function TrophyName({ name }: { name: string }) {
+  const numberedName = name.match(/^(.*?)\s+(#\d+)$/);
+  if (!numberedName) return <span className="trophy-name">{name}</span>;
+  return (
+    <span className="trophy-name trophy-name-numbered">
+      <span>{numberedName[1]}</span>
+      <span>{numberedName[2]}</span>
+    </span>
+  );
+}
+
 function normalizePrizeKey(value: unknown) {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase('ru-RU').replace(/[_-]+/g, ' ') : '';
 }
@@ -237,7 +248,7 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
                 )}
               </div>
               <div className="trophy-caption">
-                <span className="trophy-name">{trophy.name}</span>
+                <TrophyName name={trophy.name} />
                 <span className="trophy-progress">{collected.size}/{trophy.total} частей</span>
               </div>
             </article>
@@ -276,7 +287,7 @@ export function GiftsCatalogScreen({ onBack, prizes }: CatalogProps) {
                 )}
               </div>
               <div className="trophy-caption">
-                <span className="trophy-name">{trophy.name}</span>
+                <TrophyName name={trophy.name} />
               </div>
             </article>
           );
