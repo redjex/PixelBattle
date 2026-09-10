@@ -130,6 +130,22 @@ function FourPartTrophyCard({ image, collected, title }: { image: string; collec
   );
 }
 
+function FramedTrophyPreview({ image, title }: { image: string; title: string }) {
+  const clipId = `trophy-preview-${image.replace(/\D/g, '')}`;
+  const framePath = 'M7 1.5H117V5.5H121.5V118.5H117V122.5H7V118.5H2.5V5.5H7V1.5Z';
+  return (
+    <svg className="trophy-card-preview trophy-framed-preview" viewBox="0 0 124 124" role="img" aria-label={title}>
+      <defs>
+        <clipPath id={clipId}>
+          <path d={framePath} />
+        </clipPath>
+      </defs>
+      <image href={image} x="2.5" y="1.5" width="119" height="121" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipId})`} />
+      <path d={framePath} fill="none" stroke="#000" strokeWidth="3" strokeLinejoin="miter" />
+    </svg>
+  );
+}
+
 function normalizePrizeKey(value: unknown) {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase('ru-RU').replace(/[_-]+/g, ' ') : '';
 }
@@ -204,7 +220,11 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
             <article className="trophy-item" key={trophy.id}>
               <div className="trophy-card">
                 {trophy.preview && collected.size >= trophy.total ? (
-                  <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                  trophy.puzzleImage ? (
+                    <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
+                  ) : (
+                    <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                  )
                 ) : trophy.puzzleImage ? (
                   <FourPartTrophyCard image={trophy.puzzleImage} collected={collected} title={trophy.name} />
                 ) : (
@@ -241,7 +261,11 @@ export function GiftsCatalogScreen({ onBack, prizes }: CatalogProps) {
             <article className="trophy-item" key={trophy.id}>
               <div className="trophy-card">
                 {trophy.preview ? (
-                  <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                  trophy.puzzleImage ? (
+                    <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
+                  ) : (
+                    <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                  )
                 ) : (
                   <>
                     <img className="trophy-card-base" src={trophy.base} alt="" />
