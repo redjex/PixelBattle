@@ -122,6 +122,7 @@ button { color: inherit; }
 .trophy-card { position:relative; width:117px; height:117px; }
 .trophy-card-base { position:absolute; inset:-3px; width:123px; height:123px; display:block; max-width:none; }
 .trophy-card-preview { position:absolute; inset:-3px; width:124px; height:124px; display:block; max-width:none; image-rendering:auto; }
+.trophy-four-part-card { position:absolute; inset:-3px; width:124px; height:124px; display:block; max-width:none; overflow:visible; image-rendering:auto; }
 .trophy-card-part { position:absolute; z-index:1; display:block; max-width:none; pointer-events:none; }
 .trophy-part-full { inset:-3px; width:124px; height:124px; }
 .trophy-part-half-right { top:-3px; right:-3px; width:86px; height:124px; }
@@ -131,7 +132,7 @@ button { color: inherit; }
 .trophy-part-right { left:29.7%; top:-2.6%; width:73%; height:105.2%; }
 .trophy-part-left { left:-2.6%; top:-2.6%; width:58.7%; height:105.2%; }
 .trophy-caption { margin-top:6px; display:flex; flex-direction:column; align-items:center; font-family:"Minecraft Rus",monospace; font-weight:400; line-height:15px; white-space:nowrap; }
-.trophy-name { color:#008efb; font-size:14px; }
+.trophy-name { max-width:145px; color:#008efb; font-size:14px; line-height:15px; white-space:normal; overflow-wrap:anywhere; }
 .trophy-progress { color:#000; font-size:10px; }
 .stats-content { position:absolute; inset:118px 20px 28px; overflow:auto; padding:18px 8px; }
 .stats-redesign { inset:0; padding:0 18px 150px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }

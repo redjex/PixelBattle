@@ -16,6 +16,7 @@ type TrophyDefinition = {
   total: number;
   base: string;
   preview?: string;
+  puzzleImage?: string;
   parts: TrophyPart[];
 };
 
@@ -69,7 +70,65 @@ const TROPHIES: TrophyDefinition[] = [
       { src: '/assets/trophies/bear-2v2.svg?v=3', className: 'trophy-part-half-left', number: 2 },
     ],
   },
+  {
+    id: 'liberty-figure-252202', aliases: ['libertyfigure 252202', 'liberty figure 252202'],
+    name: 'LibertyFigure #252202', total: 4, base: '',
+    preview: '/assets/trophies/png/5.png', puzzleImage: '/assets/trophies/png/5.png', parts: [],
+  },
+  {
+    id: 'candy-cane-162605', aliases: ['candycane 162605', 'candy cane 162605'],
+    name: 'CandyCane #162605', total: 4, base: '',
+    preview: '/assets/trophies/png/6.png', puzzleImage: '/assets/trophies/png/6.png', parts: [],
+  },
+  {
+    id: 'vice-cream-227533', aliases: ['vicecream 227533', 'vice cream 227533'],
+    name: 'ViceCream #227533', total: 4, base: '',
+    preview: '/assets/trophies/png/7.png', puzzleImage: '/assets/trophies/png/7.png', parts: [],
+  },
+  {
+    id: 'vice-cream-428029', aliases: ['vicecream 428029', 'vice cream 428029'],
+    name: 'ViceCream #428029', total: 4, base: '',
+    preview: '/assets/trophies/png/8.png', puzzleImage: '/assets/trophies/png/8.png', parts: [],
+  },
+  {
+    id: 'chill-flame-303522', aliases: ['chillflame 303522', 'chill flame 303522'],
+    name: 'ChillFlame #303522', total: 4, base: '',
+    preview: '/assets/trophies/png/9.png', puzzleImage: '/assets/trophies/png/9.png', parts: [],
+  },
 ];
+
+const FOUR_PART_PATHS = [
+  'M1.5 35.8936H8.79883V44.4922H22.9961V22.8857H18.6963V18.8857H8.79883V30.2949H1.5V1.5H60.3896V5.79883H64.6895V64.6895H36.1895V65.9883H39.6895V70.3857H43.9883V77.5869H39.6895V81.8857H26.1895V77.5869H21.583V70.3857H26.1895V65.9883H29.1895V64.6895H1.5V35.8936Z',
+  'M35.8936 64.689V57.3901H40.1924V53.0903H44.4922V47.4927H40.1924V43.1929H25.9961V47.4927H21.6963V53.0903H25.9961V57.3901H30.2949V64.689H1.5V5.79932H5.79883V1.49951H64.6895V22.4995H65.9883V18.2007H75.7012V22.4995H80V43.1929H65.9883V38.894H64.6895V64.689H35.8936Z',
+  'M64.689 47.4922H57.3901V38.8936H43.1929V60.5H47.4927V64.5H57.3901V53.0908H64.689V81.8857H5.79932V77.5869H1.49951V18.6963H29.9995V17.3975H26.4995V13H22.2007V5.79883H26.4995V1.5H39.9995V5.79883H44.606V13H39.9995V17.3975H36.9995V18.6963H64.689V47.4922Z',
+  'M45.6064 1.5V8.79883H41.3076V13.0986H37.0078V18.6963H41.3076V22.9961H55.5039V18.6963H59.8037V13.0986H55.5039V8.79883H51.2051V1.5H80V60.3896H75.7012V64.6895H16.8105V43.6895H15.5117V47.9883H5.79883V43.6895H1.5V22.9961H15.5117V27.2949H16.8105V1.5H45.6064Z',
+] as const;
+
+const FOUR_PART_TRANSFORMS = ['translate(59 0)', 'translate(0 0)', 'translate(0 40)', 'translate(42 59)'] as const;
+
+function FourPartTrophyCard({ image, collected, title }: { image: string; collected: Set<number>; title: string }) {
+  const clipPrefix = `trophy-${image.replace(/\D/g, '')}`;
+  return (
+    <svg className="trophy-four-part-card" viewBox="0 0 124 124" role="img" aria-label={title}>
+      <defs>
+        {FOUR_PART_PATHS.map((path, index) => (
+          <clipPath id={`${clipPrefix}-part-${index + 1}`} key={`clip-${index + 1}`}>
+            <path d={path} transform={FOUR_PART_TRANSFORMS[index]} />
+          </clipPath>
+        ))}
+      </defs>
+      {FOUR_PART_PATHS.map((path, index) => (
+        <g key={`part-${index + 1}`}>
+          <path d={path} transform={FOUR_PART_TRANSFORMS[index]} fill="#c6c6c6" />
+          {collected.has(index + 1) && (
+            <image href={image} x="1.5" y="1.5" width="121" height="121" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipPrefix}-part-${index + 1})`} />
+          )}
+          <path d={path} transform={FOUR_PART_TRANSFORMS[index]} fill="none" stroke="#000" strokeWidth="3" strokeLinejoin="round" />
+        </g>
+      ))}
+    </svg>
+  );
+}
 
 function normalizePrizeKey(value: unknown) {
   return typeof value === 'string' ? value.trim().toLocaleLowerCase('ru-RU').replace(/[_-]+/g, ' ') : '';
@@ -103,7 +162,7 @@ function prizeParts(prizes: unknown[], trophy: TrophyDefinition) {
 const GIFT_IMAGE_ASSETS = [
   '/assets/present.svg?v=2',
   '/assets/present.png?v=2',
-  ...TROPHIES.flatMap((trophy) => [trophy.base, ...trophy.parts.map((part) => part.src), trophy.preview]
+  ...TROPHIES.flatMap((trophy) => [trophy.base, ...trophy.parts.map((part) => part.src), trophy.preview, trophy.puzzleImage]
     .filter((src): src is string => Boolean(src))),
 ];
 const GIFT_ANIMATION = '/assets/emoji_gifts.tgs?v=1';
@@ -146,6 +205,8 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
               <div className="trophy-card">
                 {trophy.preview && collected.size >= trophy.total ? (
                   <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                ) : trophy.puzzleImage ? (
+                  <FourPartTrophyCard image={trophy.puzzleImage} collected={collected} title={trophy.name} />
                 ) : (
                   <>
                     <img className="trophy-card-base" src={trophy.base} alt="" />

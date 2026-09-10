@@ -454,6 +454,11 @@ func (w *Writer) ClaimDueTrophyPart(ctx context.Context, userID string, now time
 		{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2},
 		{ID: "besigned", Name: "BeSigned", Total: 2},
 		{ID: "bear", Name: "Мишка", Total: 2},
+		{ID: "liberty-figure-252202", Name: "LibertyFigure #252202", Total: 4},
+		{ID: "candy-cane-162605", Name: "CandyCane #162605", Total: 4},
+		{ID: "vice-cream-227533", Name: "ViceCream #227533", Total: 4},
+		{ID: "vice-cream-428029", Name: "ViceCream #428029", Total: 4},
+		{ID: "chill-flame-303522", Name: "ChillFlame #303522", Total: 4},
 	}
 	counts := make(map[string]int, len(definitions))
 	indexes := make(map[string]int, len(definitions))
