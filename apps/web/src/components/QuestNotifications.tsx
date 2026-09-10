@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { currentDailyKey, getDailyQuests } from '../dailyQuests';
+import { getPlayerLevelProgress } from '../playerLevel';
 import { getCachedStatistics, refreshStatistics } from '../statisticsCache';
 
 type QuestNotice = { id: string; label: string };
@@ -12,6 +13,7 @@ export function QuestNotifications() {
   const refreshTimerRef = useRef<number | null>(null);
   const refreshUntilRef = useRef(0);
   const trophyEventsRef = useRef(new Set<string>());
+  const playerLevelRef = useRef<number | null>(null);
 
   useEffect(() => {
     const initData = window.Telegram?.WebApp?.initData;
@@ -22,14 +24,19 @@ export function QuestNotifications() {
       try {
         const stats = await refreshStatistics(initData);
         const quests = getDailyQuests(stats, userId);
+        const playerLevel = getPlayerLevelProgress(stats.placedPixels).level;
         const doneNow = new Set(quests.filter((quest) => quest.done).map((quest) => quest.id));
         if (initializedRef.current && mayNotify) {
           const newNotices = quests
             .filter((quest) => quest.done && !completedRef.current.has(quest.id))
             .map(({ id, label }) => ({ id, label }));
+          if (playerLevelRef.current !== null && playerLevel > playerLevelRef.current) {
+            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel}!` });
+          }
           if (newNotices.length) setNotices((current) => [...current, ...newNotices]);
         }
         completedRef.current = doneNow;
+        playerLevelRef.current = playerLevel;
         initializedRef.current = true;
       } catch {
         // A later placement retry will synchronize progress again.
@@ -39,6 +46,7 @@ export function QuestNotifications() {
     const cached = getCachedStatistics();
     if (cached) {
       completedRef.current = new Set(getDailyQuests(cached, userId).filter((quest) => quest.done).map((quest) => quest.id));
+      playerLevelRef.current = getPlayerLevelProgress(cached.placedPixels).level;
       initializedRef.current = true;
     } else {
       void sync(false);
