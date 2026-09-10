@@ -22,19 +22,6 @@ type TrophyDefinition = {
 
 const TROPHIES: TrophyDefinition[] = [
   {
-    id: 'snow-mittens-1', aliases: ['snow mittens 1', 'snow_mittens_1'], name: 'Snow Mittens', total: 4,
-    base: '/assets/trophies/snow-mittens-1-base.svg',
-    parts: [{ src: '/assets/trophies/snow-mittens-1-part.png', className: 'trophy-part-snow-one', number: 1 }],
-  },
-  {
-    id: 'snow-mittens-2', aliases: ['snow mittens 2', 'snow_mittens_2'], name: 'Snow Mittens', total: 4,
-    base: '/assets/trophies/snow-mittens-2-base.svg',
-    parts: [
-      { src: '/assets/trophies/snow-mittens-2-top-part.png', className: 'trophy-part-snow-two-top', number: 1 },
-      { src: '/assets/trophies/snow-mittens-2-part.png', className: 'trophy-part-snow-two-bottom', number: 2 },
-    ],
-  },
-  {
     id: 'yng-explrz', aliases: ['yng explrz', 'yng_explrz'], name: 'YNG EXPLRZ', total: 2,
     base: '/assets/trophies/yng-explrz-base.svg',
     preview: '/assets/trophies/yng-explrz-main.svg?v=4',
