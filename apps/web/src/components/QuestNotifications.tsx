@@ -31,7 +31,7 @@ export function QuestNotifications() {
             .filter((quest) => quest.done && !completedRef.current.has(quest.id))
             .map(({ id, label }) => ({ id, label }));
           if (playerLevelRef.current !== null && playerLevel > playerLevelRef.current) {
-            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel}!` });
+            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel} уровня!` });
           }
           if (newNotices.length) setNotices((current) => [...current, ...newNotices]);
         }
