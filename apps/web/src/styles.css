@@ -243,9 +243,9 @@ button { color: inherit; }
 .brand-pill { position:relative; display:grid; place-items:center; font-size:15px; }
 .online-pill { display:flex; align-items:center; justify-content:center; gap:7px; font-family:"Minecraft Rus",monospace; font-size:14px; font-variant-numeric:tabular-nums; }
 .online-dot { width:8px; height:8px; flex:0 0 auto; border:2px solid #000; border-radius:50%; background:#31e52d; box-shadow:0 0 0 1px #fff; }
-.main-menu .app-top-status { animation:menu-status-enter .65s cubic-bezier(.22,1,.36,1) both; }
+.battle-screen .app-top-status { top:calc(18px + var(--tg-content-safe-area-inset-top, 0px)); animation:menu-status-enter .65s cubic-bezier(.22,1,.36,1) both; }
 @keyframes menu-status-enter { from { opacity:0; transform:translate(-50%,-18px); } to { opacity:1; transform:translate(-50%,0); } }
-@media (prefers-reduced-motion:reduce) { .main-menu .app-top-status { animation:none; } }
+@media (prefers-reduced-motion:reduce) { .battle-screen .app-top-status { animation:none; } }
 
 .zoom-controls { position:absolute; z-index:3; left:max(16px, env(safe-area-inset-left)); top:50%; transform:translateY(-50%); display:grid; gap:8px; }
 .glass-button { width:44px; height:44px; padding:0; border:0; border-radius:50%; cursor:pointer; display:grid; place-items:center; }

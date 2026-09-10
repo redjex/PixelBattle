@@ -3,6 +3,7 @@ import { GlassControls } from './GlassControls';
 import { PixelBoard } from './PixelBoard';
 import type { Pixel } from '../types/pixel';
 import { dispatchTrophyAward } from '../hooks/usePixelSocket';
+import { SeasonStatus } from './SeasonStatus';
 
 const COLORS = [
   '#FF8080', '#FFCA73', '#FBFFA5', '#7CFF80', '#7EFFF2', '#84D0FF', '#8290FF', '#CD81FF', '#FF80D0', '#FDFDFD',
@@ -54,7 +55,7 @@ function CasinoCoordinates({ x, y }: { x: number; y: number }) {
   return <span className="casino-coordinates"><RollingCoordinate value={x} /><span>,</span><RollingCoordinate value={y} /></span>;
 }
 
-export function BattleScreen() {
+export function BattleScreen({ online }: { online: number | null }) {
   const [placementCooldownMs, setPlacementCooldownMs] = useState(5000);
   const [paused, setPaused] = useState(false);
   const [zoom, setZoom] = useState(10);
@@ -316,6 +317,7 @@ export function BattleScreen() {
 
   return (
     <div className="battle-screen">
+      <SeasonStatus online={online} showOnline />
       <PixelBoard
         color={color}
         zoom={zoom}

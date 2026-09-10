@@ -1,13 +1,11 @@
 import { ParallaxBackground } from './ParallaxBackground';
-import { SeasonStatus } from './SeasonStatus';
 
-type Props = { active: boolean; onOpenMap: () => void; onOpenStats: () => void; onOpenGifts: () => void; maintenance: boolean; online: number | null };
+type Props = { active: boolean; onOpenMap: () => void; onOpenStats: () => void; onOpenGifts: () => void; maintenance: boolean };
 
-export function MainMenu({ active, onOpenMap, onOpenStats, onOpenGifts, maintenance, online }: Props) {
+export function MainMenu({ active, onOpenMap, onOpenStats, onOpenGifts, maintenance }: Props) {
   return (
     <div className={`main-menu${active ? '' : ' app-view-hidden'}`} data-node-id="1878:25595" aria-hidden={!active}>
       <ParallaxBackground active={active} />
-      <SeasonStatus online={online} showOnline />
       <img className="menu-logo" src="/assets/pixel_logo.png" alt="Pixel Battle" />
       <div className="menu-actions">
         <div className="menu-shortcuts">
