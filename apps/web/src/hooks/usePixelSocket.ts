@@ -8,7 +8,7 @@ type TrophyAwardedMessage = {
   nickname: string;
 };
 
-function dispatchTrophyAward(value: unknown) {
+export function dispatchTrophyAward(value: unknown) {
   if (!value || typeof value !== 'object') return;
   const message = value as Record<string, unknown>;
   if (message.type !== 'trophy_awarded' || typeof message.eventId !== 'string'

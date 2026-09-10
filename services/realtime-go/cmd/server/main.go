@@ -494,8 +494,9 @@ func main() {
 			payload, _ := json.Marshal(eventForClient(event))
 			hub.Broadcast(payload)
 		}
+		trophyAward := awardDueTrophy(r.Context(), identity, author)
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory})
+		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory, "trophyAward": trophyAward})
 	})
 	statsHandler := func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)

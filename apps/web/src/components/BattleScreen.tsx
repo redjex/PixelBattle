@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { GlassControls } from './GlassControls';
 import { PixelBoard } from './PixelBoard';
 import type { Pixel } from '../types/pixel';
+import { dispatchTrophyAward } from '../hooks/usePixelSocket';
 
 const COLORS = [
   '#FF8080', '#FFCA73', '#FBFFA5', '#7CFF80', '#7EFFF2', '#84D0FF', '#8290FF', '#CD81FF', '#FF80D0', '#FDFDFD',
@@ -268,9 +269,10 @@ export function BattleScreen() {
         headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
         body: JSON.stringify({ ...selectedPixel, color, operationId: crypto.randomUUID() }),
       });
-      const result = await response.json() as { inventory?: Inventory };
+      const result = await response.json() as { inventory?: Inventory; trophyAward?: unknown };
       if (result.inventory) setInventory(result.inventory);
       if (response.ok) {
+        if (result.trophyAward) dispatchTrophyAward(result.trophyAward);
         setItemMode(null);
         window.dispatchEvent(new Event('pixelbattle:placement-accepted'));
       }
