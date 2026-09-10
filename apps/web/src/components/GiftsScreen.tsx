@@ -91,7 +91,7 @@ const FOUR_PART_PATHS = [
   'M45.6064 1.5V8.79883H41.3076V13.0986H37.0078V18.6963H41.3076V22.9961H55.5039V18.6963H59.8037V13.0986H55.5039V8.79883H51.2051V1.5H80V60.3896H75.7012V64.6895H16.8105V43.6895H15.5117V47.9883H5.79883V43.6895H1.5V22.9961H15.5117V27.2949H16.8105V1.5H45.6064Z',
 ] as const;
 
-const FOUR_PART_TRANSFORMS = ['translate(59 0)', 'translate(0 0)', 'translate(0 40)', 'translate(42 59)'] as const;
+const FOUR_PART_TRANSFORMS = ['translate(57 0)', 'translate(0 0)', 'translate(0 40)', 'translate(42 57)'] as const;
 
 function FourPartTrophyCard({ image, collected, title }: { image: string; collected: Set<number>; title: string }) {
   const clipPrefix = `trophy-${image.replace(/\D/g, '')}`;
