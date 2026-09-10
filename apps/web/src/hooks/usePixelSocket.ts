@@ -6,6 +6,7 @@ type TrophyAwardedMessage = {
   eventId: string;
   userId: string;
   nickname: string;
+  completed: boolean;
 };
 
 export function dispatchTrophyAward(value: unknown) {
@@ -19,6 +20,7 @@ export function dispatchTrophyAward(value: unknown) {
       eventId: message.eventId,
       userId: message.userId,
       nickname: message.nickname,
+      completed: message.completed === true,
     },
   }));
 }

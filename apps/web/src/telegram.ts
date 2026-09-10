@@ -28,6 +28,9 @@ export type TelegramWebApp = {
   onEvent?: (eventType: string, callback: () => void) => void;
   offEvent?: (eventType: string, callback: () => void) => void;
   DeviceOrientation?: TelegramDeviceOrientation;
+  HapticFeedback?: {
+    notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
+  };
   BackButton?: {
     show: () => void;
     hide: () => void;

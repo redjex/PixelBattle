@@ -170,10 +170,15 @@ button { color: inherit; }
 .quest-notification-text { position:relative; z-index:1; max-width:100%; font-size:13px; line-height:1.2; }
 .quest-notification-text::after { content:""; position:absolute; z-index:1; left:-4px; top:50%; width:calc(100% + 8px); height:3px; background:#000; transform:translateY(-50%) scaleX(0); transform-origin:left center; animation:quest-notice-strike .525s cubic-bezier(.22,1,.36,1) 1.25s forwards; }
 .quest-notification.no-strike .quest-notification-text::after { display:none; animation:none; }
+.trophy-confetti { position:fixed; z-index:29; inset:0; overflow:hidden; pointer-events:none; }
+.trophy-confetti i { position:absolute; top:-18px; width:7px; height:12px; border:1px solid #000; image-rendering:pixelated; animation-name:trophy-confetti-fall; animation-timing-function:cubic-bezier(.22,.7,.38,1); animation-fill-mode:forwards; }
+.trophy-confetti i:nth-child(3n) { width:9px; height:9px; transform:rotate(45deg); }
+.trophy-confetti i:nth-child(4n) { width:5px; height:14px; }
 @media (max-width:600px), (pointer:coarse) { .quest-notification-layer { top:calc(max(var(--tg-content-safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) + 78px); } }
 @keyframes quest-notice-life { 0% { opacity:0; transform:translateY(-28px) scale(.96); } 10%,82% { opacity:1; transform:translateY(0) scale(1); } 100% { opacity:0; transform:translateY(-18px) scale(.98); } }
 @keyframes quest-notice-strike { to { transform:translateY(-50%) scaleX(1); } }
-@media (prefers-reduced-motion:reduce) { .quest-notification { animation:quest-notice-fade 4.1s ease both; } .quest-notification-text::after { animation:quest-notice-strike .15s linear 1.25s forwards; } }
+@keyframes trophy-confetti-fall { from { opacity:1; transform:translate3d(0,-20px,0) rotate(0deg); } 85% { opacity:1; } to { opacity:0; transform:translate3d(var(--confetti-drift),calc(100vh + 40px),0) rotate(720deg); } }
+@media (prefers-reduced-motion:reduce) { .quest-notification { animation:quest-notice-fade 4.1s ease both; } .quest-notification-text::after { animation:quest-notice-strike .15s linear 1.25s forwards; } .trophy-confetti { display:none; } }
 @keyframes quest-notice-fade { 0%,100% { opacity:0; } 8%,88% { opacity:1; } }
 .stats-agreement, .stats-back { width:100%; font-family:inherit; cursor:pointer; }
 .stats-agreement { margin:4px 0 12px; border:0; background:transparent; font-size:10px; text-decoration:underline; }

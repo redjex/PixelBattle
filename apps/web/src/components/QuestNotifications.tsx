@@ -1,10 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { currentDailyKey, getDailyQuests } from '../dailyQuests';
 import { getPlayerLevelProgress } from '../playerLevel';
 import { getCachedStatistics, refreshStatistics } from '../statisticsCache';
 
-type QuestNotice = { id: string; label: string; strike: boolean };
-type TrophyAwardedDetail = { eventId: string; userId: string; nickname: string };
+type QuestNotice = { id: string; label: string; strike: boolean; celebrate: boolean };
+type TrophyAwardedDetail = { eventId: string; userId: string; nickname: string; completed: boolean };
+
+const CONFETTI_COLORS = ['#008EFB', '#FFD60A', '#31E52D', '#FF3B30', '#AF52DE', '#FFFFFF'];
+const CONFETTI = Array.from({ length: 42 }, (_, index) => ({
+  left: `${(index * 37 + 7) % 100}%`,
+  delay: `${(index % 7) * 0.08}s`,
+  duration: `${1.9 + (index % 5) * 0.16}s`,
+  drift: `${((index * 29) % 81) - 40}px`,
+  color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
+}));
 
 export function QuestNotifications() {
   const [notices, setNotices] = useState<QuestNotice[]>([]);
@@ -29,9 +38,9 @@ export function QuestNotifications() {
         if (initializedRef.current && mayNotify) {
           const newNotices: QuestNotice[] = quests
             .filter((quest) => quest.done && !completedRef.current.has(quest.id))
-            .map(({ id, label }) => ({ id, label, strike: true }));
+            .map(({ id, label }) => ({ id, label, strike: true, celebrate: false }));
           if (playerLevelRef.current !== null && playerLevel > playerLevelRef.current) {
-            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel} уровня!`, strike: false });
+            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel} уровня!`, strike: false, celebrate: false });
           }
           if (newNotices.length) setNotices((current) => [...current, ...newNotices]);
         }
@@ -72,12 +81,13 @@ export function QuestNotifications() {
       trophyEventsRef.current.add(detail.eventId);
       const isWinner = String(userId ?? '') === detail.userId;
       const nickname = detail.nickname.trim();
+      const completed = isWinner && detail.completed;
       const label = isWinner
-        ? 'Вам выпал трофей!'
+        ? completed ? 'Вы собрали трофей!' : 'Вам выпал трофей!'
         : `Игроку ${nickname || 'участнику'} выпал трофей!`;
       setNotices((current) => [
         ...current,
-        { id: `trophy-${detail.eventId}`, label, strike: false },
+        { id: `trophy-${detail.eventId}`, label, strike: false, celebrate: completed },
       ]);
     };
     window.addEventListener('pixelbattle:placement-accepted', handlePlacement);
@@ -97,6 +107,7 @@ export function QuestNotifications() {
     const audio = new Audio('/assets/notification.mp3');
     audio.volume = 0.72;
     void audio.play().catch(() => undefined);
+    if (active.celebrate) window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     const timer = window.setTimeout(() => setNotices((current) => current.slice(1)), 4100);
     return () => window.clearTimeout(timer);
   }, [active]);
@@ -111,16 +122,32 @@ export function QuestNotifications() {
 
   if (!active) return null;
   return (
-    <div className="quest-notification-layer" aria-live="polite" aria-atomic="true">
-      <section className={`quest-notification${active.strike ? '' : ' no-strike'}`} key={active.id}>
-        <svg className="quest-notification-shape" viewBox="0 0 310 72" preserveAspectRatio="none" aria-hidden="true">
-          <path
-            d="M7 16H24V9C24 4.5 27 2 31 2C33.5 2 35.5 3.2 38 5L66 16H303C306.5 16 308 18.5 308 22V65C308 68.5 306 70 302 70H8C4 70 2 68 2 64V22C2 18 4 16 7 16Z"
-            vectorEffect="non-scaling-stroke"
+    <>
+      {active.celebrate && <div className="trophy-confetti" aria-hidden="true">
+        {CONFETTI.map((particle, index) => (
+          <i
+            key={index}
+            style={{
+              left: particle.left,
+              animationDelay: particle.delay,
+              animationDuration: particle.duration,
+              backgroundColor: particle.color,
+              '--confetti-drift': particle.drift,
+            } as CSSProperties}
           />
-        </svg>
-        <span className="quest-notification-text"><span>{active.label}</span></span>
-      </section>
-    </div>
+        ))}
+      </div>}
+      <div className="quest-notification-layer" aria-live="polite" aria-atomic="true">
+        <section className={`quest-notification${active.strike ? '' : ' no-strike'}`} key={active.id}>
+          <svg className="quest-notification-shape" viewBox="0 0 310 72" preserveAspectRatio="none" aria-hidden="true">
+            <path
+              d="M7 16H24V9C24 4.5 27 2 31 2C33.5 2 35.5 3.2 38 5L66 16H303C306.5 16 308 18.5 308 22V65C308 68.5 306 70 302 70H8C4 70 2 68 2 64V22C2 18 4 16 7 16Z"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+          <span className="quest-notification-text"><span>{active.label}</span></span>
+        </section>
+      </div>
+    </>
   );
 }

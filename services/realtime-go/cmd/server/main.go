@@ -176,7 +176,7 @@ func main() {
 			if nickname == "" {
 				nickname = author.DisplayName
 			}
-			notification := &trophyAwardEvent{Type: "trophy_awarded", EventID: id(), UserID: userID, Nickname: nickname}
+			notification := &trophyAwardEvent{Type: "trophy_awarded", EventID: id(), UserID: userID, Nickname: nickname, Completed: prize.CollectedParts >= prize.Total}
 			payload, marshalErr := json.Marshal(notification)
 			if marshalErr != nil {
 				log.Printf("trophy notification encoding failed for user=%s: %v", userID, marshalErr)
@@ -1350,10 +1350,11 @@ type publicPixelEvent struct {
 }
 
 type trophyAwardEvent struct {
-	Type     string `json:"type"`
-	EventID  string `json:"eventId"`
-	UserID   string `json:"userId"`
-	Nickname string `json:"nickname"`
+	Type      string `json:"type"`
+	EventID   string `json:"eventId"`
+	UserID    string `json:"userId"`
+	Nickname  string `json:"nickname"`
+	Completed bool   `json:"completed,omitempty"`
 }
 
 func publicSnapshot(pixels []domain.BoardPixel) []publicBoardPixel {
