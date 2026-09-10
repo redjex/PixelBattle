@@ -136,12 +136,7 @@ function FramedTrophyPreview({ image, title }: { image: string; title: string })
 function TrophyName({ name }: { name: string }) {
   const numberedName = name.match(/^(.*?)\s+(#\d+)$/);
   if (!numberedName) return <span className="trophy-name">{name}</span>;
-  return (
-    <span className="trophy-name trophy-name-numbered">
-      <span>{numberedName[1]}</span>
-      <span>{numberedName[2]}</span>
-    </span>
-  );
+  return <span className="trophy-name">{numberedName[1]}</span>;
 }
 
 function normalizePrizeKey(value: unknown) {
