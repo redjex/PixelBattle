@@ -127,9 +127,16 @@ export function App() {
       }).catch(() => undefined);
     };
     const timer = window.setInterval(syncAccess, 2500);
+    const handleTrophyAwarded = (event: Event) => {
+      const winnerID = (event as CustomEvent<{ userId?: string }>).detail?.userId;
+      const currentUserID = getTelegramWebApp()?.initDataUnsafe?.user?.id;
+      if (winnerID === String(currentUserID ?? '')) syncAccess();
+    };
+    window.addEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
     return () => {
       active = false;
       window.clearInterval(timer);
+      window.removeEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
     };
   }, [authState]);
 
@@ -171,7 +178,10 @@ export function App() {
 
   if (authState !== 'authorized') return <main className="app-shell"><section className="phone-frame"><LoadingScreen message={authState === 'invalid' ? 'Ошибка проверки Telegram' : 'Откройте через Telegram'} /></section></main>;
   return <main className="app-shell"><section className="phone-frame" aria-label="Pixel Battle">
-    {loading ? <LoadingScreen /> : maintenanceMode || screen === 'menu' ? <MainMenu maintenance={maintenanceMode} online={appAccess?.online ?? null} onOpenMap={() => { if (!maintenanceMode) setScreen('map'); }} onOpenStats={() => { if (!maintenanceMode) setScreen('stats'); }} onOpenGifts={() => { if (!maintenanceMode) setScreen('gifts'); }} /> : screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} onOpenCatalog={() => setScreen('gifts-catalog')} onBack={() => setScreen('menu')} /> : screen === 'gifts-catalog' ? <GiftsCatalogScreen onBack={() => setScreen('gifts')} /> : <BattleScreen />}
+    {loading ? <LoadingScreen /> : <>
+      <MainMenu active={maintenanceMode || screen === 'menu'} maintenance={maintenanceMode} online={appAccess?.online ?? null} onOpenMap={() => { if (!maintenanceMode) setScreen('map'); }} onOpenStats={() => { if (!maintenanceMode) setScreen('stats'); }} onOpenGifts={() => { if (!maintenanceMode) setScreen('gifts'); }} />
+      {!maintenanceMode && screen !== 'menu' && (screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} onOpenCatalog={() => setScreen('gifts-catalog')} onBack={() => setScreen('menu')} /> : screen === 'gifts-catalog' ? <GiftsCatalogScreen prizes={appAccess?.prizes ?? []} onBack={() => setScreen('gifts')} /> : <BattleScreen />)}
+    </>}
     {!loading && !maintenanceMode && <QuestNotifications />}
   </section></main>;
 }

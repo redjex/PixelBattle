@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
+	"math/rand/v2"
 	"pixelbattle/realtime/internal/domain"
 	"time"
 )
@@ -158,6 +159,13 @@ CREATE TABLE IF NOT EXISTS level_reward_claims (
  claimed_at timestamptz NOT NULL DEFAULT NOW(),
  PRIMARY KEY (user_id,level)
 );
+CREATE TABLE IF NOT EXISTS trophy_drop_state (
+ id smallint PRIMARY KEY CHECK (id=1),
+ next_drop_at timestamptz NOT NULL
+);
+INSERT INTO trophy_drop_state(id,next_drop_at)
+VALUES(1,NOW()+((600+floor(random()*301))::text||' seconds')::interval)
+ON CONFLICT(id) DO NOTHING;
 CREATE INDEX IF NOT EXISTS pixel_events_user_id_idx ON pixel_events(user_id);
 CREATE INDEX IF NOT EXISTS pixel_events_user_created_at_idx ON pixel_events(user_id,created_at);
 CREATE INDEX IF NOT EXISTS pixel_events_cell_version_idx ON pixel_events(board_id,x,y,version);
@@ -388,6 +396,101 @@ func (w *Writer) Prizes(ctx context.Context, telegramID string) (json.RawMessage
 		return nil, err
 	}
 	return json.RawMessage(prizes), nil
+}
+
+type TrophyPrize struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	CollectedParts int    `json:"collectedParts"`
+	Total          int    `json:"total"`
+}
+
+func (w *Writer) TrophyDropTime(ctx context.Context) (time.Time, error) {
+	var nextDrop time.Time
+	err := w.pool.QueryRow(ctx, `SELECT next_drop_at FROM trophy_drop_state WHERE id=1`).Scan(&nextDrop)
+	return nextDrop, err
+}
+
+// MakeTrophyDropDue arms exactly one global drop. The first successful pixel
+// placement will claim it and schedule the next regular 10-15 minute window.
+func (w *Writer) MakeTrophyDropDue(ctx context.Context, now time.Time) (time.Time, error) {
+	var nextDrop time.Time
+	err := w.pool.QueryRow(ctx, `UPDATE trophy_drop_state SET next_drop_at=$1 WHERE id=1 RETURNING next_drop_at`, now).Scan(&nextDrop)
+	return nextDrop, err
+}
+
+func (w *Writer) ClaimDueTrophyPart(ctx context.Context, userID string, now time.Time) (*TrophyPrize, error) {
+	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var nextDrop time.Time
+	if err := tx.QueryRow(ctx, `SELECT next_drop_at FROM trophy_drop_state WHERE id=1 FOR UPDATE`).Scan(&nextDrop); err != nil {
+		return nil, err
+	}
+	if now.Before(nextDrop) {
+		return nil, tx.Commit(ctx)
+	}
+
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT prizes FROM profiles WHERE telegram_id=$1 FOR UPDATE`, userID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	var prizes []map[string]any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &prizes); err != nil {
+			return nil, fmt.Errorf("decode trophy prizes: %w", err)
+		}
+	}
+	definitions := []TrophyPrize{
+		{ID: "stickers", Name: "Стикеры", Total: 2},
+		{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2},
+		{ID: "besigned", Name: "BeSigned", Total: 2},
+		{ID: "bear", Name: "Мишка", Total: 2},
+	}
+	counts := make(map[string]int, len(definitions))
+	indexes := make(map[string]int, len(definitions))
+	for index, prize := range prizes {
+		id, _ := prize["id"].(string)
+		value, _ := prize["collectedParts"].(float64)
+		counts[id] = int(value)
+		indexes[id] = index
+	}
+	candidates := make([]TrophyPrize, 0, len(definitions))
+	for _, definition := range definitions {
+		if counts[definition.ID] < definition.Total {
+			candidates = append(candidates, definition)
+		}
+	}
+	next := now.Add(time.Duration(600+rand.IntN(301)) * time.Second)
+	if _, err := tx.Exec(ctx, `UPDATE trophy_drop_state SET next_drop_at=$1 WHERE id=1`, next); err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, tx.Commit(ctx)
+	}
+	won := candidates[rand.IntN(len(candidates))]
+	won.CollectedParts = counts[won.ID] + 1
+	if index, ok := indexes[won.ID]; ok {
+		prizes[index]["name"] = won.Name
+		prizes[index]["collectedParts"] = won.CollectedParts
+		prizes[index]["total"] = won.Total
+	} else {
+		prizes = append(prizes, map[string]any{"id": won.ID, "name": won.Name, "collectedParts": won.CollectedParts, "total": won.Total})
+	}
+	updated, err := json.Marshal(prizes)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE profiles SET prizes=$2,updated_at=NOW() WHERE telegram_id=$1`, userID, updated); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &won, nil
 }
 
 func (w *Writer) LoadSnapshot(ctx context.Context, boardID string) ([]domain.BoardPixel, error) {

@@ -161,6 +161,32 @@ func main() {
 	checkpoint := func(ctx context.Context) error {
 		return writer.WriteSnapshot(ctx, "main", boardStore.Snapshot("main"), version.Load(), persistence.BoardSize{Width: int(boardWidth.Load()), Height: int(boardHeight.Load())})
 	}
+	awardDueTrophy := func(ctx context.Context, userID string, author domain.PixelAuthor) *trophyAwardEvent {
+		if writer == nil {
+			return nil
+		}
+		prize, err := writer.ClaimDueTrophyPart(ctx, userID, time.Now().UTC())
+		if err != nil {
+			log.Printf("trophy drop failed for user=%s: %v", userID, err)
+			return nil
+		}
+		if prize != nil {
+			log.Printf("trophy part awarded: user=%s prize=%s part=%d/%d", userID, prize.ID, prize.CollectedParts, prize.Total)
+			nickname := author.Username
+			if nickname == "" {
+				nickname = author.DisplayName
+			}
+			notification := &trophyAwardEvent{Type: "trophy_awarded", EventID: id(), UserID: userID, Nickname: nickname}
+			payload, marshalErr := json.Marshal(notification)
+			if marshalErr != nil {
+				log.Printf("trophy notification encoding failed for user=%s: %v", userID, marshalErr)
+				return nil
+			}
+			hub.Broadcast(payload)
+			return notification
+		}
+		return nil
+	}
 	allowedOrigin := env("GO_ALLOWED_ORIGIN", "http://localhost:5173")
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -377,6 +403,7 @@ func main() {
 			return
 		}
 		boardStore.Apply(event)
+		trophyAward := awardDueTrophy(r.Context(), identity, author)
 		if freezeChargeUsed && writer != nil {
 			_ = checkpoint(r.Context())
 		}
@@ -384,6 +411,7 @@ func main() {
 		publicEvent := eventForClient(event)
 		payload, _ := json.Marshal(publicEvent)
 		hub.Broadcast(payload)
+		publicEvent.TrophyAward = trophyAward
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, publicEvent)
 	})
@@ -832,6 +860,43 @@ func main() {
 		}
 		writeJSON(w, map[string]any{"granted": true, "userId": request.UserID, "item": request.Item, "amount": request.Amount, "inventory": inventory})
 	})
+	http.HandleFunc("/api/admin/trophies/drop", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "persistence unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		now := time.Now().UTC()
+		var nextDrop time.Time
+		var err error
+		switch r.Method {
+		case http.MethodGet:
+			nextDrop, err = writer.TrophyDropTime(r.Context())
+		case http.MethodPost:
+			nextDrop, err = writer.MakeTrophyDropDue(r.Context(), now)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err != nil {
+			log.Printf("trophy drop admin action failed: %v", err)
+			http.Error(w, "trophy drop state unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		remainingSeconds := int64(nextDrop.Sub(now).Seconds())
+		if remainingSeconds < 0 {
+			remainingSeconds = 0
+		} else if nextDrop.After(now) && remainingSeconds == 0 {
+			remainingSeconds = 1
+		}
+		writeJSON(w, map[string]any{
+			"ready":            !nextDrop.After(now),
+			"remainingSeconds": remainingSeconds,
+		})
+	})
 	http.HandleFunc("/api/admin/game/pause", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
@@ -1002,6 +1067,7 @@ func main() {
 					return
 				}
 				boardStore.Apply(event)
+				awardDueTrophy(r.Context(), identity, author)
 				if freezeChargeUsed && writer != nil {
 					_ = checkpoint(r.Context())
 				}
@@ -1279,6 +1345,14 @@ type publicPixelEvent struct {
 	Version     int64             `json:"version"`
 	Author      publicPixelAuthor `json:"author"`
 	FrozenUntil *time.Time        `json:"frozenUntil,omitempty"`
+	TrophyAward *trophyAwardEvent `json:"trophyAward,omitempty"`
+}
+
+type trophyAwardEvent struct {
+	Type     string `json:"type"`
+	EventID  string `json:"eventId"`
+	UserID   string `json:"userId"`
+	Nickname string `json:"nickname"`
 }
 
 func publicSnapshot(pixels []domain.BoardPixel) []publicBoardPixel {

@@ -65,7 +65,7 @@ export function preloadParallaxBackground() {
   return parallaxPreloadPromise;
 }
 
-export function ParallaxBackground() {
+export function ParallaxBackground({ active = true }: { active?: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [assetsReady, setAssetsReady] = useState(parallaxAssetsReady);
 
@@ -78,6 +78,7 @@ export function ParallaxBackground() {
   }, []);
 
   useEffect(() => {
+    if (!active) return;
     const root = rootRef.current;
     if (!root || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
@@ -211,7 +212,7 @@ export function ParallaxBackground() {
       }
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
     };
-  }, []);
+  }, [active]);
 
   return (
     <div ref={rootRef} className={`parallax-background${assetsReady ? ' ready' : ''}`} aria-hidden="true">

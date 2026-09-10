@@ -320,6 +320,7 @@ def admin_category(chat_id: int, category: str, notice: str | None = None) -> No
                 [{"text": pause_button, "callback_data": "admin:toggle_pause"}],
                 [{"text": test_mode_button, "callback_data": "admin:toggle_test_mode"}],
                 [{"text": "Онлайн и пик", "callback_data": "admin:online"}],
+                [{"text": "Трофеи", "callback_data": "admin:trophies"}],
                 [{"text": "Выдать бомбы", "callback_data": "admin:items:bomb"}],
                 [{"text": "Выдать заморозки", "callback_data": "admin:items:ice"}],
                 [
@@ -333,6 +334,40 @@ def admin_category(chat_id: int, category: str, notice: str | None = None) -> No
             ]
         }
         send_admin_photo(chat_id, "game.png", f"Настройки игры{suffix}", markup)
+
+
+def admin_trophies(chat_id: int, notice: str | None = None) -> None:
+    try:
+        response = realtime_request("GET", "/api/admin/trophies/drop")
+        response.raise_for_status()
+        state = response.json()
+        remaining = max(0, int(state["remainingSeconds"]))
+        if bool(state.get("ready")):
+            status = "Дроп готов: трофей получит игрок, который следующим поставит пиксель."
+        else:
+            minutes, seconds = divmod(remaining, 60)
+            status = f"До следующего дропа: {minutes} мин. {seconds:02d} сек."
+    except (requests.RequestException, KeyError, TypeError, ValueError):
+        status = "Не удалось получить состояние дропа."
+    suffix = f"\n\n{notice}" if notice else ""
+    markup = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Убрать ожидание (1 раз)",
+                    "callback_data": "admin:trophies:ready",
+                }
+            ],
+            [{"text": "Обновить", "callback_data": "admin:trophies"}],
+            [{"text": "Назад", "callback_data": "admin:category:game"}],
+        ]
+    }
+    send_admin_photo(
+        chat_id,
+        "game.png",
+        f"Настройки трофеев\n\n{status}{suffix}",
+        markup,
+    )
 
 
 def realtime_request(method: str, path: str, **kwargs: Any) -> requests.Response:
@@ -1040,6 +1075,20 @@ def handle_callback(callback: dict[str, Any]) -> None:
         except requests.RequestException:
             notice = "Не удалось изменить режим теста."
         admin_category(chat_id, "game", notice)
+        return
+    if action == "admin:trophies":
+        admin_trophies(chat_id)
+        return
+    if action == "admin:trophies:ready":
+        try:
+            response = realtime_request("POST", "/api/admin/trophies/drop")
+            response.raise_for_status()
+            admin_trophies(
+                chat_id,
+                "Ожидание снято один раз. Следующий поставленный пиксель запустит случайную выдачу.",
+            )
+        except requests.RequestException:
+            admin_trophies(chat_id, "Не удалось снять ожидание.")
         return
     if action == "admin:toggle_admin_cooldown":
         admin_ids = [str(admin_id) for admin_id in ADMIN_IDS]

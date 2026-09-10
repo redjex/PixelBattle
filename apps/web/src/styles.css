@@ -50,6 +50,7 @@ button { color: inherit; }
 
 .app-shell { position: fixed; inset: 0; width: 100vw; height: 100%; min-height: 0; display: grid; place-items: center; background: #f2f2f2; overscroll-behavior: none; }
 .phone-frame { position: relative; width: 100vw; height: 100%; min-height: 0; overflow: hidden; border-radius: 0; background: #fff; overscroll-behavior: none; }
+.app-view-hidden { visibility:hidden; opacity:0; pointer-events:none; }
 
 .loading-screen { position:absolute; left:50%; top:50%; width:min(100vw, calc(100vh * 402 / 874), 402px); height:auto; aspect-ratio:402 / 874; overflow:hidden; transform:translate(-50%, -50%); background:#fff; }
 .parallax-background { position:absolute; z-index:0; inset:0; overflow:hidden; visibility:hidden; pointer-events:none; background:#6f55cd; --parallax-x:0; --parallax-y:0; }
@@ -102,15 +103,36 @@ button { color: inherit; }
 .menu-shortcut:active { transform:translateY(3px); filter:brightness(.86); }
 .menu-shortcut:disabled { pointer-events:none; filter:grayscale(1); }
 .gifts-screen, .gifts-catalog-screen { font-family:"Minecraft Rus",monospace; color:#000; }
-.gifts-logo { position:absolute; z-index:1; top:calc(72px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:221px; max-width:calc(100% - 56px); height:auto; transform:translateX(-50%); image-rendering:pixelated; }
+.gifts-screen > :not(.stats-back), .gifts-catalog-screen > :not(.stats-back) { translate:1px 0; }
+.gifts-logo { position:absolute; z-index:3; top:calc(72px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:221px; max-width:calc(100% - 56px); height:auto; transform:translateX(-50%); image-rendering:pixelated; }
 .gifts-empty { position:absolute; z-index:1; top:50%; left:50%; width:calc(100% - 52px); transform:translate(-50%,-46%); display:flex; flex-direction:column; align-items:center; text-align:center; }
 .gifts-empty-icon { display:block; width:118px; height:118px; object-fit:contain; image-rendering:pixelated; }
 .gifts-empty p { font-family:"Minecraft Rus",monospace; font-weight:400; }
 .gifts-empty-title { margin:17px 0 0; color:#8a8a8a; font-size:16px; line-height:1.35; }
 .gifts-empty-hint { margin:17px 0 0; color:#000; font-size:13px; line-height:1.4; }
+.gifts-inventory { position:absolute; z-index:1; inset:calc(185px + var(--tg-content-safe-area-inset-top, 0px)) 0 145px; box-sizing:border-box; overflow-x:hidden; overflow-y:auto; padding:8px 0 24px; display:grid; grid-template-columns:repeat(2,117px); grid-auto-rows:150px; justify-content:center; align-content:start; column-gap:60px; row-gap:35px; touch-action:pan-y; overscroll-behavior-y:contain; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.gifts-inventory::-webkit-scrollbar { display:none; }
 .gifts-catalog-link { position:absolute; z-index:3; left:50%; bottom:126px; width:calc(100% - 66px); padding:8px 0; border:0; color:#8a8a8a; background:transparent; transform:translateX(-50%); font-family:"Minecraft Rus",monospace; font-size:11px; line-height:1.25; text-align:center; cursor:pointer; }
 .gifts-catalog-link:active { color:#000; transform:translate(-50%,2px); }
 .gifts-screen .stats-back, .gifts-catalog-screen .stats-back { z-index:3; }
+.gifts-catalog-screen::after { content:""; position:absolute; z-index:2; right:0; bottom:0; left:0; height:145px; pointer-events:none; background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,.78) 38%,#fff 68%); -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); -webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 48%,#000 100%); mask-image:linear-gradient(to bottom,transparent 0%,#000 48%,#000 100%); }
+.trophy-catalog { position:absolute; z-index:1; inset:0; box-sizing:border-box; overflow-x:hidden; overflow-y:auto; padding:calc(192px + var(--tg-content-safe-area-inset-top, 0px)) 0 155px; display:grid; grid-template-columns:repeat(2,117px); grid-auto-rows:150px; justify-content:center; align-content:start; column-gap:60px; row-gap:35px; touch-action:pan-y; overscroll-behavior-y:contain; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.trophy-catalog::-webkit-scrollbar { display:none; }
+.trophy-item { width:117px; height:150px; text-align:center; }
+.trophy-card { position:relative; width:117px; height:117px; }
+.trophy-card-base { position:absolute; inset:-3px; width:123px; height:123px; display:block; max-width:none; }
+.trophy-card-preview { position:absolute; inset:-3px; width:124px; height:124px; display:block; max-width:none; image-rendering:auto; }
+.trophy-card-part { position:absolute; z-index:1; display:block; max-width:none; pointer-events:none; }
+.trophy-part-full { inset:-3px; width:124px; height:124px; }
+.trophy-part-half-right { top:-3px; right:-3px; width:86px; height:124px; }
+.trophy-part-half-left { top:-3px; left:-3px; width:69px; height:124px; }
+.trophy-part-snow-one, .trophy-part-snow-two-bottom { left:31%; top:46%; width:71%; height:56.4%; }
+.trophy-part-snow-two-top { left:-2.6%; top:-2.6%; width:64.9%; height:51.5%; transform:rotate(180deg); }
+.trophy-part-right { left:29.7%; top:-2.6%; width:73%; height:105.2%; }
+.trophy-part-left { left:-2.6%; top:-2.6%; width:58.7%; height:105.2%; }
+.trophy-caption { margin-top:6px; display:flex; flex-direction:column; align-items:center; font-family:"Minecraft Rus",monospace; font-weight:400; line-height:15px; white-space:nowrap; }
+.trophy-name { color:#008efb; font-size:14px; }
+.trophy-progress { color:#000; font-size:10px; }
 .stats-content { position:absolute; inset:118px 20px 28px; overflow:auto; padding:18px 8px; }
 .stats-redesign { inset:0; padding:0 18px 150px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }
 .stats-top-cards { display:grid; grid-template-columns:1fr; gap:8px; margin:0 auto 16px; max-width:370px; }

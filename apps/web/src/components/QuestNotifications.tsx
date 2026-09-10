@@ -3,6 +3,7 @@ import { currentDailyKey, getDailyQuests } from '../dailyQuests';
 import { getCachedStatistics, refreshStatistics } from '../statisticsCache';
 
 type QuestNotice = { id: string; label: string };
+type TrophyAwardedDetail = { eventId: string; userId: string; nickname: string };
 
 export function QuestNotifications() {
   const [notices, setNotices] = useState<QuestNotice[]>([]);
@@ -10,6 +11,7 @@ export function QuestNotifications() {
   const initializedRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
   const refreshUntilRef = useRef(0);
+  const trophyEventsRef = useRef(new Set<string>());
 
   useEffect(() => {
     const initData = window.Telegram?.WebApp?.initData;
@@ -56,10 +58,26 @@ export function QuestNotifications() {
       refreshUntilRef.current = Date.now() + 1400;
       if (refreshTimerRef.current === null) refreshTimerRef.current = window.setTimeout(poll, 0);
     };
+    const handleTrophyAwarded = (event: Event) => {
+      const detail = (event as CustomEvent<TrophyAwardedDetail>).detail;
+      if (!detail?.eventId || !detail.userId || trophyEventsRef.current.has(detail.eventId)) return;
+      trophyEventsRef.current.add(detail.eventId);
+      const isWinner = String(userId ?? '') === detail.userId;
+      const nickname = detail.nickname.trim();
+      const label = isWinner
+        ? 'Вам выпал трофей!'
+        : `Игроку ${nickname || 'участнику'} выпал трофей!`;
+      setNotices((current) => [
+        ...current,
+        { id: `trophy-${detail.eventId}`, label },
+      ]);
+    };
     window.addEventListener('pixelbattle:placement-accepted', handlePlacement);
+    window.addEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
     return () => {
       disposed = true;
       window.removeEventListener('pixelbattle:placement-accepted', handlePlacement);
+      window.removeEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
       if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = null;
     };

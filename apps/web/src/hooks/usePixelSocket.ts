@@ -1,6 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Pixel, PlacementMessage } from '../types/pixel';
 
+type TrophyAwardedMessage = {
+  type: 'trophy_awarded';
+  eventId: string;
+  userId: string;
+  nickname: string;
+};
+
+function dispatchTrophyAward(value: unknown) {
+  if (!value || typeof value !== 'object') return;
+  const message = value as Record<string, unknown>;
+  if (message.type !== 'trophy_awarded' || typeof message.eventId !== 'string'
+    || typeof message.userId !== 'string' || typeof message.nickname !== 'string') return;
+  window.dispatchEvent(new CustomEvent<TrophyAwardedMessage>('pixelbattle:trophy-awarded', {
+    detail: {
+      type: 'trophy_awarded',
+      eventId: message.eventId,
+      userId: message.userId,
+      nickname: message.nickname,
+    },
+  }));
+}
+
 export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: () => void) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<number | null>(null);
@@ -27,7 +49,7 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
       };
       socket.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as Pixel & { type?: string };
+          const message = JSON.parse(event.data) as { type?: string; [key: string]: unknown };
           if (message.type === 'error') {
             // Authentication failures are terminal for this captured initData.
             const code = String((message as { code?: unknown }).code ?? '').toLowerCase();
@@ -36,17 +58,20 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
               socket.close();
             }
           } else if (message.type === 'pixel_placed') {
-            onPixel(message);
-            if (message.operationId) {
-              const pending = pendingRef.current.get(message.operationId);
+            const pixel = message as Pixel & { type: 'pixel_placed' };
+            onPixel(pixel);
+            if (pixel.operationId) {
+              const pending = pendingRef.current.get(pixel.operationId);
               if (pending) {
                 window.clearTimeout(pending.timer);
-                pendingRef.current.delete(message.operationId);
+                pendingRef.current.delete(pixel.operationId);
                 pending.resolve(true);
               }
             }
           } else if (message.type === 'board_reload') {
             onBoardReload();
+          } else if (message.type === 'trophy_awarded') {
+            dispatchTrophyAward(message);
           }
         } catch { /* Ignore malformed server messages. */ }
       };
@@ -93,8 +118,9 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
       keepalive: true,
     }).then(async (response) => {
       if (!response.ok) return null;
-      const event = await response.json() as Pixel;
+      const event = await response.json() as Pixel & { trophyAward?: TrophyAwardedMessage };
       onPixel(event);
+      if (event.trophyAward) dispatchTrophyAward(event.trophyAward);
       return event;
     }).catch(() => null);
   }, [onPixel]);

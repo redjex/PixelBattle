@@ -1,30 +1,166 @@
-type Props = { onBack: () => void; onOpenCatalog: () => void; prizes: unknown[] };
-type CatalogProps = { onBack: () => void };
+import { TgsPlayer } from './TgsPlayer';
 
-const GIFT_ASSETS = ['/assets/present.svg?v=2', '/assets/present.png?v=2', '/assets/emoji_gifts.png?v=1'];
+type Props = { onBack: () => void; onOpenCatalog: () => void; prizes: unknown[] };
+type CatalogProps = { onBack: () => void; prizes: unknown[] };
+
+type TrophyPart = {
+  src: string;
+  className: string;
+  number: number;
+};
+
+type TrophyDefinition = {
+  id: string;
+  aliases: string[];
+  name: string;
+  total: number;
+  base: string;
+  preview?: string;
+  parts: TrophyPart[];
+};
+
+const TROPHIES: TrophyDefinition[] = [
+  {
+    id: 'snow-mittens-1', aliases: ['snow mittens 1', 'snow_mittens_1'], name: 'Snow Mittens', total: 4,
+    base: '/assets/trophies/snow-mittens-1-base.svg',
+    parts: [{ src: '/assets/trophies/snow-mittens-1-part.png', className: 'trophy-part-snow-one', number: 1 }],
+  },
+  {
+    id: 'snow-mittens-2', aliases: ['snow mittens 2', 'snow_mittens_2'], name: 'Snow Mittens', total: 4,
+    base: '/assets/trophies/snow-mittens-2-base.svg',
+    parts: [
+      { src: '/assets/trophies/snow-mittens-2-top-part.png', className: 'trophy-part-snow-two-top', number: 1 },
+      { src: '/assets/trophies/snow-mittens-2-part.png', className: 'trophy-part-snow-two-bottom', number: 2 },
+    ],
+  },
+  {
+    id: 'yng-explrz', aliases: ['yng explrz', 'yng_explrz'], name: 'YNG EXPLRZ', total: 2,
+    base: '/assets/trophies/yng-explrz-base.svg',
+    preview: '/assets/trophies/yng-explrz-main.svg?v=4',
+    parts: [
+      { src: '/assets/trophies/yng-explrz-1v2.svg?v=3', className: 'trophy-part-half-right', number: 1 },
+      { src: '/assets/trophies/yng-explrz-2v2.svg?v=3', className: 'trophy-part-half-left', number: 2 },
+    ],
+  },
+  {
+    id: 'besigned', aliases: ['be signed', 'be_signed'], name: 'BeSigned', total: 2,
+    base: '/assets/trophies/besigned-base.svg',
+    preview: '/assets/trophies/besigned-main.svg?v=4',
+    parts: [
+      { src: '/assets/trophies/besigned-1v2.svg?v=3', className: 'trophy-part-half-right', number: 1 },
+      { src: '/assets/trophies/besigned-2v2.svg?v=3', className: 'trophy-part-half-left', number: 2 },
+    ],
+  },
+  {
+    id: 'stickers', aliases: ['stickers', 'стикеры'], name: 'Стикеры', total: 2,
+    base: '/assets/trophies/two-part-base.svg',
+    preview: '/assets/trophies/stickers-main.svg?v=4',
+    parts: [
+      { src: '/assets/trophies/stickers-1v2.svg?v=3', className: 'trophy-part-half-right', number: 1 },
+      { src: '/assets/trophies/stickers-2v2.svg?v=3', className: 'trophy-part-half-left', number: 2 },
+    ],
+  },
+  {
+    id: 'bear', aliases: ['bear', 'мишка'], name: 'Мишка', total: 2,
+    base: '/assets/trophies/two-part-base.svg',
+    preview: '/assets/trophies/bear-main.svg?v=4',
+    parts: [
+      { src: '/assets/trophies/bear-1v2.svg?v=3', className: 'trophy-part-half-right', number: 1 },
+      { src: '/assets/trophies/bear-2v2.svg?v=3', className: 'trophy-part-half-left', number: 2 },
+    ],
+  },
+];
+
+function normalizePrizeKey(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLocaleLowerCase('ru-RU').replace(/[_-]+/g, ' ') : '';
+}
+
+function prizeParts(prizes: unknown[], trophy: TrophyDefinition) {
+  const keys = new Set([trophy.id, trophy.name, ...trophy.aliases].map(normalizePrizeKey));
+  const collected = new Set<number>();
+  for (const prize of prizes) {
+    if (typeof prize === 'string') {
+      if (keys.has(normalizePrizeKey(prize))) collected.add(collected.size + 1);
+      continue;
+    }
+    if (!prize || typeof prize !== 'object') continue;
+    const record = prize as Record<string, unknown>;
+    const key = [record.id, record.key, record.slug, record.type, record.name, record.title]
+      .map(normalizePrizeKey)
+      .find((candidate) => keys.has(candidate));
+    if (!key) continue;
+    const value = record.parts ?? record.collectedParts ?? record.collected_parts ?? record.progress ?? record.count ?? record.quantity;
+    if (Array.isArray(value)) {
+      value.forEach((part) => { const number = Number(part); if (Number.isInteger(number)) collected.add(number); });
+    } else {
+      const count = Number(value);
+      for (let number = 1; number <= (Number.isFinite(count) ? count : 1); number += 1) collected.add(number);
+    }
+  }
+  return new Set([...collected].filter((part) => part >= 1 && part <= trophy.total));
+}
+
+const GIFT_IMAGE_ASSETS = [
+  '/assets/present.svg?v=2',
+  '/assets/present.png?v=2',
+  ...TROPHIES.flatMap((trophy) => [trophy.base, ...trophy.parts.map((part) => part.src), trophy.preview]
+    .filter((src): src is string => Boolean(src))),
+];
+const GIFT_ANIMATION = '/assets/emoji_gifts.tgs?v=1';
 let giftAssetsPromise: Promise<void> | null = null;
 
 export function preloadGiftAssets() {
   if (!giftAssetsPromise) {
-    giftAssetsPromise = Promise.all(GIFT_ASSETS.map((src) => new Promise<void>((resolve) => {
-      const image = new Image();
-      image.onload = () => resolve();
-      image.onerror = () => resolve();
-      image.src = src;
-    }))).then(() => undefined);
+    const images = GIFT_IMAGE_ASSETS.map((src) => new Promise<void>((resolve) => {
+        const image = new Image();
+        image.onload = () => resolve();
+        image.onerror = () => resolve();
+        image.src = src;
+      }));
+    giftAssetsPromise = Promise.all([
+      ...images,
+      fetch(GIFT_ANIMATION).then(() => undefined).catch(() => undefined),
+    ]).then(() => undefined);
   }
   return giftAssetsPromise;
 }
 
 export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
+  const ownedTrophies = TROPHIES
+    .map((trophy) => ({ trophy, collected: prizeParts(prizes, trophy) }))
+    .filter(({ collected }) => collected.size > 0);
   return (
     <div className="gifts-screen">
       <img className="gifts-logo" src="/assets/present.png?v=2" alt="Трофеи" />
       {prizes.length === 0 && (
         <section className="gifts-empty" aria-label="Инвентарь трофеев пуст">
-          <img className="gifts-empty-icon" src="/assets/emoji_gifts.png?v=1" alt="" />
+          <TgsPlayer className="gifts-empty-icon" src={GIFT_ANIMATION} loop={false} />
           <p className="gifts-empty-title">В вашем инвентаре<br />еще нет предметов</p>
           <p className="gifts-empty-hint">Вы можете получить трофеи,<br />просто играя в PixelBattle</p>
+        </section>
+      )}
+      {ownedTrophies.length > 0 && (
+        <section className="gifts-inventory" aria-label="Полученные трофеи">
+          {ownedTrophies.map(({ trophy, collected }) => (
+            <article className="trophy-item" key={trophy.id}>
+              <div className="trophy-card">
+                {trophy.preview && collected.size >= trophy.total ? (
+                  <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                ) : (
+                  <>
+                    <img className="trophy-card-base" src={trophy.base} alt="" />
+                    {trophy.parts.map((part) => collected.has(part.number) && (
+                      <img className={`trophy-card-part ${part.className}`} src={part.src} alt="" key={part.src} />
+                    ))}
+                  </>
+                )}
+              </div>
+              <div className="trophy-caption">
+                <span className="trophy-name">{trophy.name}</span>
+                <span className="trophy-progress">{collected.size}/{trophy.total} частей</span>
+              </div>
+            </article>
+          ))}
         </section>
       )}
       <button className="gifts-catalog-link" onClick={onOpenCatalog}>Полный список доступных наград</button>
@@ -33,10 +169,34 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
   );
 }
 
-export function GiftsCatalogScreen({ onBack }: CatalogProps) {
+export function GiftsCatalogScreen({ onBack, prizes }: CatalogProps) {
   return (
     <div className="gifts-catalog-screen">
       <img className="gifts-logo" src="/assets/present.png?v=2" alt="Доступные награды" />
+      <section className="trophy-catalog" aria-label="Полный список доступных наград">
+        {TROPHIES.map((trophy) => {
+          const collected = prizeParts(prizes, trophy);
+          return (
+            <article className="trophy-item" key={trophy.id}>
+              <div className="trophy-card">
+                {trophy.preview ? (
+                  <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                ) : (
+                  <>
+                    <img className="trophy-card-base" src={trophy.base} alt="" />
+                    {trophy.parts.map((part) => collected.has(part.number) && (
+                      <img className={`trophy-card-part ${part.className}`} src={part.src} alt="" key={part.src} />
+                    ))}
+                  </>
+                )}
+              </div>
+              <div className="trophy-caption">
+                <span className="trophy-name">{trophy.name}</span>
+              </div>
+            </article>
+          );
+        })}
+      </section>
       <button className="stats-back" onClick={onBack}>Назад</button>
     </div>
   );

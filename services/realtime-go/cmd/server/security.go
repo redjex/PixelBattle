@@ -171,7 +171,7 @@ func allowedMethods(path string) string {
 	switch path {
 	case "/health", "/inline-map.jpg", "/ws", "/api/boards/main", "/api/boards/session", "/api/boards/main/stats", "/api/profiles/me", "/api/boards/main/image", "/api/admin/stats":
 		return "GET"
-	case "/api/boards/main/rewards":
+	case "/api/boards/main/rewards", "/api/admin/trophies/drop":
 		return "GET, POST"
 	case "/api/admin/boards/main/size", "/api/admin/game/pause", "/api/admin/game/test-mode":
 		return "GET, PUT"

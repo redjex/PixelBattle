@@ -125,6 +125,9 @@ func TestSecurityMiddleware(t *testing.T) {
 	}{
 		{"query token rejected", "GET", "/api/admin/stats?adminToken=secret", "", "", false, 401},
 		{"bearer works", "GET", "/api/admin/stats", "", "Bearer secret", false, 204},
+		{"trophy status", "GET", "/api/admin/trophies/drop", "", "Bearer secret", false, 204},
+		{"trophy force ready", "POST", "/api/admin/trophies/drop", `{}`, "Bearer secret", false, 204},
+		{"trophy method rejected", "PUT", "/api/admin/trophies/drop", `{}`, "Bearer secret", false, 405},
 		{"public inline map", "GET", "/inline-map.jpg", "", "", false, 204},
 		{"resize requires put", "POST", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 405},
 		{"resize put", "PUT", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 204},
