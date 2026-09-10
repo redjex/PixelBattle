@@ -182,6 +182,6 @@ export function App() {
       <MainMenu active={maintenanceMode || screen === 'menu'} maintenance={maintenanceMode} onOpenMap={() => { if (!maintenanceMode) setScreen('map'); }} onOpenStats={() => { if (!maintenanceMode) setScreen('stats'); }} onOpenGifts={() => { if (!maintenanceMode) setScreen('gifts'); }} />
       {!maintenanceMode && screen !== 'menu' && (screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} onOpenCatalog={() => setScreen('gifts-catalog')} onBack={() => setScreen('menu')} /> : screen === 'gifts-catalog' ? <GiftsCatalogScreen prizes={appAccess?.prizes ?? []} onBack={() => setScreen('gifts')} /> : <BattleScreen online={appAccess?.online ?? null} />)}
     </>}
-    {!loading && !maintenanceMode && <QuestNotifications />}
+    {!loading && !maintenanceMode && <QuestNotifications active={screen === 'map'} />}
   </section></main>;
 }

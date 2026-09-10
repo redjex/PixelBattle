@@ -15,8 +15,10 @@ const CONFETTI = Array.from({ length: 42 }, (_, index) => ({
   color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
 }));
 
-export function QuestNotifications() {
+export function QuestNotifications({ active: mapActive }: { active: boolean }) {
   const [notices, setNotices] = useState<QuestNotice[]>([]);
+  const activeRef = useRef(mapActive);
+  activeRef.current = mapActive;
   const completedRef = useRef(new Set<string>());
   const initializedRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
@@ -35,7 +37,7 @@ export function QuestNotifications() {
         const quests = getDailyQuests(stats, userId);
         const playerLevel = getPlayerLevelProgress(stats.placedPixels).level;
         const doneNow = new Set(quests.filter((quest) => quest.done).map((quest) => quest.id));
-        if (initializedRef.current && mayNotify) {
+        if (initializedRef.current && mayNotify && activeRef.current) {
           const newNotices: QuestNotice[] = quests
             .filter((quest) => quest.done && !completedRef.current.has(quest.id))
             .map(({ id, label }) => ({ id, label, strike: true, celebrate: false }));
@@ -76,6 +78,7 @@ export function QuestNotifications() {
       if (refreshTimerRef.current === null) refreshTimerRef.current = window.setTimeout(poll, 0);
     };
     const handleTrophyAwarded = (event: Event) => {
+      if (!activeRef.current) return;
       const detail = (event as CustomEvent<TrophyAwardedDetail>).detail;
       if (!detail?.eventId || !detail.userId || trophyEventsRef.current.has(detail.eventId)) return;
       trophyEventsRef.current.add(detail.eventId);
@@ -101,6 +104,10 @@ export function QuestNotifications() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!mapActive) setNotices([]);
+  }, [mapActive]);
+
   const active = notices[0];
   useEffect(() => {
     if (!active) return;
@@ -120,7 +127,7 @@ export function QuestNotifications() {
     return () => window.clearInterval(timer);
   }, []);
 
-  if (!active) return null;
+  if (!mapActive || !active) return null;
   return (
     <>
       {active.celebrate && <div className="trophy-confetti" aria-hidden="true">
