@@ -343,6 +343,11 @@ def admin_trophies(chat_id: int, notice: str | None = None) -> None:
         state = response.json()
         online = max(0, int(state["online"]))
         chance = max(0.0, float(state["chancePercent"]))
+        nft_claimed = max(0, int(state["nftClaimed"]))
+        nft_planned = max(0, int(state["nftPlanned"]))
+        plan_remaining = max(0, int(state["planRemainingSeconds"]))
+        days, day_remainder = divmod(plan_remaining, 86400)
+        hours = day_remainder // 3600
         force_status = (
             "Следующий подходящий пиксель гарантированно выдаст часть."
             if bool(state.get("forcedNext"))
@@ -350,7 +355,10 @@ def admin_trophies(chat_id: int, notice: str | None = None) -> None:
         )
         status = (
             f"Шанс на текущий пиксель: {chance:.3f}%\n"
-            f"Онлайн: {online}\n{force_status}"
+            f"Онлайн: {online}\n"
+            f"NFT-план: {nft_claimed}/{nft_planned}\n"
+            f"До завершения плана: {days} д. {hours} ч.\n"
+            f"{force_status}"
         )
     except (requests.RequestException, KeyError, TypeError, ValueError):
         status = "Не удалось получить состояние дропа."

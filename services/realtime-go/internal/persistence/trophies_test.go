@@ -47,3 +47,22 @@ func TestTrophyRarityAndSupplyGrid(t *testing.T) {
 		}
 	}
 }
+
+func TestNFTOutcomePlanContainsEveryRequiredPart(t *testing.T) {
+	outcomes := shuffledNFTOutcomes()
+	if len(outcomes) != 20 {
+		t.Fatalf("expected 20 NFT parts, got %d", len(outcomes))
+	}
+	counts := make(map[string]int)
+	for _, trophyID := range outcomes {
+		counts[trophyID]++
+	}
+	if counts[outcomes[len(outcomes)-1]] != 4 {
+		t.Fatal("final planned outcome must complete its NFT")
+	}
+	for _, definition := range trophyDefinitions {
+		if definition.Cap == 1 && counts[definition.ID] != definition.Total {
+			t.Fatalf("NFT %s has %d planned parts, want %d", definition.ID, counts[definition.ID], definition.Total)
+		}
+	}
+}

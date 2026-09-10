@@ -168,6 +168,23 @@ ALTER TABLE trophy_drop_state ADD COLUMN IF NOT EXISTS force_next boolean NOT NU
 INSERT INTO trophy_drop_state(id,next_drop_at)
 VALUES(1,NOW()+((600+floor(random()*301))::text||' seconds')::interval)
 ON CONFLICT(id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS trophy_nft_campaign (
+ id smallint PRIMARY KEY CHECK (id=1),
+ starts_at timestamptz NOT NULL,
+ ends_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS trophy_nft_plan (
+ sequence smallint PRIMARY KEY CHECK (sequence BETWEEN 1 AND 20),
+ trophy_id text NOT NULL,
+ release_at timestamptz NOT NULL,
+ claimed_at timestamptz,
+ winner_user_id text
+);
+CREATE TABLE IF NOT EXISTS trophy_nft_winners (
+ trophy_id text PRIMARY KEY,
+ user_id text NOT NULL,
+ assigned_at timestamptz NOT NULL DEFAULT NOW()
+);
 CREATE INDEX IF NOT EXISTS pixel_events_user_id_idx ON pixel_events(user_id);
 CREATE INDEX IF NOT EXISTS pixel_events_user_created_at_idx ON pixel_events(user_id,created_at);
 CREATE INDEX IF NOT EXISTS pixel_events_cell_version_idx ON pixel_events(board_id,x,y,version);
@@ -401,8 +418,49 @@ func (w *Writer) Prizes(ctx context.Context, telegramID string) (json.RawMessage
 }
 
 func (w *Writer) ResetTrophies(ctx context.Context, telegramID string) (bool, error) {
-	tag, err := w.pool.Exec(ctx, `UPDATE profiles SET prizes='[]'::jsonb,updated_at=NOW() WHERE telegram_id=$1`, telegramID)
-	return err == nil && tag.RowsAffected() == 1, err
+	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var stateID int
+	if err := tx.QueryRow(ctx, `SELECT id FROM trophy_drop_state WHERE id=1 FOR UPDATE`).Scan(&stateID); err != nil {
+		return false, err
+	}
+	rows, err := tx.Query(ctx, `SELECT trophy_id FROM trophy_nft_winners WHERE user_id=$1`, telegramID)
+	if err != nil {
+		return false, err
+	}
+	var plannedTrophies []string
+	for rows.Next() {
+		var trophyID string
+		if err := rows.Scan(&trophyID); err != nil {
+			rows.Close()
+			return false, err
+		}
+		plannedTrophies = append(plannedTrophies, trophyID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, err
+	}
+	rows.Close()
+	tag, err := tx.Exec(ctx, `UPDATE profiles SET prizes='[]'::jsonb,updated_at=NOW() WHERE telegram_id=$1`, telegramID)
+	if err != nil || tag.RowsAffected() != 1 {
+		return false, err
+	}
+	for _, trophyID := range plannedTrophies {
+		if _, err := tx.Exec(ctx, `UPDATE trophy_nft_plan SET claimed_at=NULL,winner_user_id=NULL WHERE trophy_id=$1`, trophyID); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM trophy_nft_winners WHERE trophy_id=$1`, trophyID); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 type TrophyPrize struct {
@@ -410,6 +468,18 @@ type TrophyPrize struct {
 	Name           string `json:"name"`
 	CollectedParts int    `json:"collectedParts"`
 	Total          int    `json:"total"`
+}
+
+type TrophyClaim struct {
+	TrophyPrize
+	UserID string
+}
+
+type NFTPlanStatus struct {
+	StartsAt time.Time
+	EndsAt   time.Time
+	Total    int
+	Claimed  int
 }
 
 type trophyDefinition struct {
@@ -431,6 +501,20 @@ var trophyDefinitions = []trophyDefinition{
 }
 
 var trophyLocation = time.FixedZone("Asia/Yekaterinburg", 5*60*60)
+
+func shuffledNFTOutcomes() []string {
+	outcomes := make([]string, 0, 20)
+	for _, definition := range trophyDefinitions {
+		if definition.Cap != 1 {
+			continue
+		}
+		for range definition.Total {
+			outcomes = append(outcomes, definition.ID)
+		}
+	}
+	rand.Shuffle(len(outcomes), func(i, j int) { outcomes[i], outcomes[j] = outcomes[j], outcomes[i] })
+	return outcomes
+}
 
 // TrophyDropChance returns the chance for one successful placement. A quiet
 // board and off-peak hours deliberately make solo farming inefficient.
@@ -478,7 +562,96 @@ func (w *Writer) ForceNextTrophyDrop(ctx context.Context) (bool, error) {
 	return forced, err
 }
 
-func (w *Writer) ClaimTrophyPart(ctx context.Context, userID string, now time.Time, online int64) (*TrophyPrize, error) {
+// EnsureNFTDropPlan records the complete seven-day NFT outcome before any of
+// its new parts are awarded. The order and release instants never change on a
+// restart, and the final row necessarily completes one of the five NFTs.
+func (w *Writer) EnsureNFTDropPlan(ctx context.Context, now time.Time) error {
+	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	startsAt := now.UTC()
+	endsAt := startsAt.Add(7 * 24 * time.Hour)
+	if _, err := tx.Exec(ctx, `INSERT INTO trophy_nft_campaign(id,starts_at,ends_at) VALUES(1,$1,$2) ON CONFLICT(id) DO NOTHING`, startsAt, endsAt); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx, `SELECT starts_at,ends_at FROM trophy_nft_campaign WHERE id=1 FOR UPDATE`).Scan(&startsAt, &endsAt); err != nil {
+		return err
+	}
+	var existing int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM trophy_nft_plan`).Scan(&existing); err != nil {
+		return err
+	}
+	if existing > 0 {
+		return tx.Commit(ctx)
+	}
+
+	outcomes := shuffledNFTOutcomes()
+	duration := endsAt.Sub(startsAt)
+	for index, trophyID := range outcomes {
+		slotStart := duration * time.Duration(index) / time.Duration(len(outcomes))
+		slotEnd := duration * time.Duration(index+1) / time.Duration(len(outcomes))
+		releaseAt := startsAt.Add(slotStart + time.Duration(rand.Float64()*float64(slotEnd-slotStart)))
+		if index == len(outcomes)-1 {
+			releaseAt = endsAt.Add(-time.Hour)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO trophy_nft_plan(sequence,trophy_id,release_at) VALUES($1,$2,$3)`, index+1, trophyID, releaseAt); err != nil {
+			return err
+		}
+	}
+
+	for _, definition := range trophyDefinitions {
+		if definition.Cap != 1 {
+			continue
+		}
+		var userID string
+		var collected int
+		err := tx.QueryRow(ctx, `
+SELECT telegram_id,(prize->>'collectedParts')::int
+FROM profiles
+CROSS JOIN LATERAL jsonb_array_elements(prizes) AS prize
+WHERE prize->>'id'=$1 AND jsonb_typeof(prize->'collectedParts')='number'
+ORDER BY (prize->>'collectedParts')::int DESC,updated_at ASC
+LIMIT 1`, definition.ID).Scan(&userID, &collected)
+		if err == pgx.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if collected > definition.Total {
+			collected = definition.Total
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO trophy_nft_winners(trophy_id,user_id,assigned_at) VALUES($1,$2,$3) ON CONFLICT(trophy_id) DO NOTHING`, definition.ID, userID, startsAt); err != nil {
+			return err
+		}
+		if collected > 0 {
+			if _, err := tx.Exec(ctx, `
+UPDATE trophy_nft_plan SET claimed_at=$3,winner_user_id=$2
+WHERE sequence IN (
+ SELECT sequence FROM trophy_nft_plan WHERE trophy_id=$1 ORDER BY release_at LIMIT $4
+)`, definition.ID, userID, startsAt, collected); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (w *Writer) NFTDropPlanStatus(ctx context.Context) (NFTPlanStatus, error) {
+	var status NFTPlanStatus
+	err := w.pool.QueryRow(ctx, `
+SELECT campaign.starts_at,campaign.ends_at,COUNT(plan.sequence),COUNT(plan.claimed_at)
+FROM trophy_nft_campaign AS campaign
+LEFT JOIN trophy_nft_plan AS plan ON true
+WHERE campaign.id=1
+GROUP BY campaign.starts_at,campaign.ends_at`).Scan(&status.StartsAt, &status.EndsAt, &status.Total, &status.Claimed)
+	return status, err
+}
+
+func (w *Writer) ClaimTrophyPart(ctx context.Context, userID string, now time.Time, online int64) (*TrophyClaim, error) {
 	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err
@@ -489,12 +662,35 @@ func (w *Writer) ClaimTrophyPart(ctx context.Context, userID string, now time.Ti
 	if err := tx.QueryRow(ctx, `SELECT force_next FROM trophy_drop_state WHERE id=1 FOR UPDATE`).Scan(&forced); err != nil {
 		return nil, err
 	}
-	if !forced && rand.Float64() >= TrophyDropChance(now, online) {
+	var plannedSequence int
+	var plannedID string
+	plannedErr := tx.QueryRow(ctx, `
+SELECT sequence,trophy_id FROM trophy_nft_plan
+WHERE claimed_at IS NULL AND release_at <= $1
+ORDER BY release_at,sequence LIMIT 1 FOR UPDATE`, now).Scan(&plannedSequence, &plannedID)
+	planned := plannedErr == nil
+	if plannedErr != nil && plannedErr != pgx.ErrNoRows {
+		return nil, plannedErr
+	}
+	if !planned && !forced && rand.Float64() >= TrophyDropChance(now, online) {
 		return nil, tx.Commit(ctx)
 	}
 
+	recipientID := userID
+	if planned {
+		err := tx.QueryRow(ctx, `SELECT user_id FROM trophy_nft_winners WHERE trophy_id=$1`, plannedID).Scan(&recipientID)
+		if err == pgx.ErrNoRows {
+			recipientID = userID
+			if _, err := tx.Exec(ctx, `INSERT INTO trophy_nft_winners(trophy_id,user_id) VALUES($1,$2)`, plannedID, recipientID); err != nil {
+				return nil, err
+			}
+		} else if err != nil {
+			return nil, err
+		}
+	}
+
 	var raw []byte
-	if err := tx.QueryRow(ctx, `SELECT prizes FROM profiles WHERE telegram_id=$1 FOR UPDATE`, userID).Scan(&raw); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT prizes FROM profiles WHERE telegram_id=$1 FOR UPDATE`, recipientID).Scan(&raw); err != nil {
 		return nil, err
 	}
 	var prizes []map[string]any
@@ -540,11 +736,27 @@ GROUP BY prize->>'id'`)
 
 	candidates := make([]trophyDefinition, 0, len(trophyDefinitions))
 	for _, definition := range trophyDefinitions {
+		if planned && definition.ID != plannedID {
+			continue
+		}
+		if !planned && definition.Cap == 1 {
+			continue
+		}
 		if counts[definition.ID] < definition.Total && completed[definition.ID] < definition.Cap {
 			candidates = append(candidates, definition)
 		}
 	}
 	if len(candidates) == 0 {
+		if planned {
+			if _, err := tx.Exec(ctx, `UPDATE trophy_nft_plan SET claimed_at=$2,winner_user_id=$3 WHERE sequence=$1`, plannedSequence, now, recipientID); err != nil {
+				return nil, err
+			}
+		}
+		if forced {
+			if _, err := tx.Exec(ctx, `UPDATE trophy_drop_state SET force_next=false WHERE id=1`); err != nil {
+				return nil, err
+			}
+		}
 		return nil, tx.Commit(ctx)
 	}
 	totalWeight := 0
@@ -572,8 +784,13 @@ GROUP BY prize->>'id'`)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE profiles SET prizes=$2,updated_at=NOW() WHERE telegram_id=$1`, userID, updated); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE profiles SET prizes=$2,updated_at=NOW() WHERE telegram_id=$1`, recipientID, updated); err != nil {
 		return nil, err
+	}
+	if planned {
+		if _, err := tx.Exec(ctx, `UPDATE trophy_nft_plan SET claimed_at=$2,winner_user_id=$3 WHERE sequence=$1`, plannedSequence, now, recipientID); err != nil {
+			return nil, err
+		}
 	}
 	if forced {
 		if _, err := tx.Exec(ctx, `UPDATE trophy_drop_state SET force_next=false WHERE id=1`); err != nil {
@@ -583,7 +800,7 @@ GROUP BY prize->>'id'`)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return &won.TrophyPrize, nil
+	return &TrophyClaim{TrophyPrize: won.TrophyPrize, UserID: recipientID}, nil
 }
 
 func (w *Writer) LoadSnapshot(ctx context.Context, boardID string) ([]domain.BoardPixel, error) {

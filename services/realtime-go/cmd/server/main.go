@@ -108,6 +108,9 @@ func main() {
 		if err := writer.Migrate(startupCtx); err != nil {
 			log.Fatalf("migration failed: %v", err)
 		}
+		if err := writer.EnsureNFTDropPlan(startupCtx, time.Now().UTC()); err != nil {
+			log.Fatalf("NFT drop plan initialization failed: %v", err)
+		}
 		redisQueue, err = queue.NewRedis(redisURL)
 		if err != nil {
 			log.Fatalf("redis startup failed: %v", err)
@@ -165,18 +168,31 @@ func main() {
 		if writer == nil {
 			return nil
 		}
-		prize, err := writer.ClaimTrophyPart(ctx, userID, time.Now().UTC(), presence.Count())
+		claim, err := writer.ClaimTrophyPart(ctx, userID, time.Now().UTC(), presence.Count())
 		if err != nil {
 			log.Printf("trophy drop failed for user=%s: %v", userID, err)
 			return nil
 		}
-		if prize != nil {
-			log.Printf("trophy part awarded: user=%s prize=%s part=%d/%d", userID, prize.ID, prize.CollectedParts, prize.Total)
-			nickname := author.Username
-			if nickname == "" {
-				nickname = author.DisplayName
+		if claim != nil {
+			prize := claim.TrophyPrize
+			winnerID := claim.UserID
+			winner := domain.PixelAuthor{ID: winnerID}
+			if winnerID == userID {
+				winner = author
+			} else {
+				storedWinner, profileErr := writer.Profile(ctx, winnerID)
+				if profileErr != nil {
+					log.Printf("trophy winner profile failed for user=%s: %v", winnerID, profileErr)
+				} else {
+					winner = storedWinner
+				}
 			}
-			notification := &trophyAwardEvent{Type: "trophy_awarded", EventID: id(), UserID: userID, Nickname: nickname, Completed: prize.CollectedParts >= prize.Total}
+			log.Printf("trophy part awarded: user=%s prize=%s part=%d/%d", winnerID, prize.ID, prize.CollectedParts, prize.Total)
+			nickname := winner.Username
+			if nickname == "" {
+				nickname = winner.DisplayName
+			}
+			notification := &trophyAwardEvent{Type: "trophy_awarded", EventID: id(), UserID: winnerID, Nickname: nickname, Completed: prize.CollectedParts >= prize.Total}
 			payload, marshalErr := json.Marshal(notification)
 			if marshalErr != nil {
 				log.Printf("trophy notification encoding failed for user=%s: %v", userID, marshalErr)
@@ -887,13 +903,28 @@ func main() {
 			http.Error(w, "trophy drop state unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		plan, err := writer.NFTDropPlanStatus(r.Context())
+		if err != nil {
+			log.Printf("NFT plan status failed: %v", err)
+			http.Error(w, "NFT plan state unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		online := presence.Count()
+		planRemainingSeconds := int64(plan.EndsAt.Sub(now).Seconds())
+		if planRemainingSeconds < 0 {
+			planRemainingSeconds = 0
+		}
 		writeJSON(w, map[string]any{
-			"ready":         forced,
-			"forcedNext":    forced,
-			"online":        online,
-			"chancePercent": persistence.TrophyDropChance(now, online) * 100,
-			"localHour":     now.In(time.FixedZone("Asia/Yekaterinburg", 5*60*60)).Hour(),
+			"ready":                forced,
+			"forcedNext":           forced,
+			"online":               online,
+			"chancePercent":        persistence.TrophyDropChance(now, online) * 100,
+			"localHour":            now.In(time.FixedZone("Asia/Yekaterinburg", 5*60*60)).Hour(),
+			"planStartsAt":         plan.StartsAt,
+			"planEndsAt":           plan.EndsAt,
+			"nftPlanned":           plan.Total,
+			"nftClaimed":           plan.Claimed,
+			"planRemainingSeconds": planRemainingSeconds,
 		})
 	})
 	http.HandleFunc("/api/admin/trophies/reset", func(w http.ResponseWriter, r *http.Request) {
