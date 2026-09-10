@@ -165,7 +165,7 @@ func main() {
 		if writer == nil {
 			return nil
 		}
-		prize, err := writer.ClaimDueTrophyPart(ctx, userID, time.Now().UTC())
+		prize, err := writer.ClaimTrophyPart(ctx, userID, time.Now().UTC(), presence.Count())
 		if err != nil {
 			log.Printf("trophy drop failed for user=%s: %v", userID, err)
 			return nil
@@ -871,13 +871,13 @@ func main() {
 			return
 		}
 		now := time.Now().UTC()
-		var nextDrop time.Time
+		var forced bool
 		var err error
 		switch r.Method {
 		case http.MethodGet:
-			nextDrop, err = writer.TrophyDropTime(r.Context())
+			forced, err = writer.TrophyDropForced(r.Context())
 		case http.MethodPost:
-			nextDrop, err = writer.MakeTrophyDropDue(r.Context(), now)
+			forced, err = writer.ForceNextTrophyDrop(r.Context())
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -887,15 +887,13 @@ func main() {
 			http.Error(w, "trophy drop state unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		remainingSeconds := int64(nextDrop.Sub(now).Seconds())
-		if remainingSeconds < 0 {
-			remainingSeconds = 0
-		} else if nextDrop.After(now) && remainingSeconds == 0 {
-			remainingSeconds = 1
-		}
+		online := presence.Count()
 		writeJSON(w, map[string]any{
-			"ready":            !nextDrop.After(now),
-			"remainingSeconds": remainingSeconds,
+			"ready":         forced,
+			"forcedNext":    forced,
+			"online":        online,
+			"chancePercent": persistence.TrophyDropChance(now, online) * 100,
+			"localHour":     now.In(time.FixedZone("Asia/Yekaterinburg", 5*60*60)).Hour(),
 		})
 	})
 	http.HandleFunc("/api/admin/trophies/reset", func(w http.ResponseWriter, r *http.Request) {

@@ -341,12 +341,17 @@ def admin_trophies(chat_id: int, notice: str | None = None) -> None:
         response = realtime_request("GET", "/api/admin/trophies/drop")
         response.raise_for_status()
         state = response.json()
-        remaining = max(0, int(state["remainingSeconds"]))
-        if bool(state.get("ready")):
-            status = "Дроп готов: трофей получит игрок, который следующим поставит пиксель."
-        else:
-            minutes, seconds = divmod(remaining, 60)
-            status = f"До следующего дропа: {minutes} мин. {seconds:02d} сек."
+        online = max(0, int(state["online"]))
+        chance = max(0.0, float(state["chancePercent"]))
+        force_status = (
+            "Следующий подходящий пиксель гарантированно выдаст часть."
+            if bool(state.get("forcedNext"))
+            else "Принудительный дроп не включён."
+        )
+        status = (
+            f"Шанс на текущий пиксель: {chance:.3f}%\n"
+            f"Онлайн: {online}\n{force_status}"
+        )
     except (requests.RequestException, KeyError, TypeError, ValueError):
         status = "Не удалось получить состояние дропа."
     suffix = f"\n\n{notice}" if notice else ""
@@ -354,7 +359,7 @@ def admin_trophies(chat_id: int, notice: str | None = None) -> None:
         "inline_keyboard": [
             [
                 {
-                    "text": "Убрать ожидание (1 раз)",
+                    "text": "Гарантировать дроп (1 раз)",
                     "callback_data": "admin:trophies:ready",
                 }
             ],
@@ -1125,10 +1130,10 @@ def handle_callback(callback: dict[str, Any]) -> None:
             response.raise_for_status()
             admin_trophies(
                 chat_id,
-                "Ожидание снято один раз. Следующий поставленный пиксель запустит случайную выдачу.",
+                "Следующий подходящий пиксель гарантированно выдаст случайную часть.",
             )
         except requests.RequestException:
-            admin_trophies(chat_id, "Не удалось снять ожидание.")
+            admin_trophies(chat_id, "Не удалось включить гарантированный дроп.")
         return
     if action == "admin:trophies:reset":
         pending_actions[(user_id, chat_id)] = "trophy_reset_user"

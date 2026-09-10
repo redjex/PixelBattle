@@ -161,8 +161,10 @@ CREATE TABLE IF NOT EXISTS level_reward_claims (
 );
 CREATE TABLE IF NOT EXISTS trophy_drop_state (
  id smallint PRIMARY KEY CHECK (id=1),
- next_drop_at timestamptz NOT NULL
+ next_drop_at timestamptz NOT NULL,
+ force_next boolean NOT NULL DEFAULT false
 );
+ALTER TABLE trophy_drop_state ADD COLUMN IF NOT EXISTS force_next boolean NOT NULL DEFAULT false;
 INSERT INTO trophy_drop_state(id,next_drop_at)
 VALUES(1,NOW()+((600+floor(random()*301))::text||' seconds')::interval)
 ON CONFLICT(id) DO NOTHING;
@@ -410,32 +412,84 @@ type TrophyPrize struct {
 	Total          int    `json:"total"`
 }
 
-func (w *Writer) TrophyDropTime(ctx context.Context) (time.Time, error) {
-	var nextDrop time.Time
-	err := w.pool.QueryRow(ctx, `SELECT next_drop_at FROM trophy_drop_state WHERE id=1`).Scan(&nextDrop)
-	return nextDrop, err
+type trophyDefinition struct {
+	TrophyPrize
+	Weight int
+	Cap    int64
 }
 
-// MakeTrophyDropDue arms exactly one global drop. The first successful pixel
-// placement will claim it and schedule the next regular 10-15 minute window.
-func (w *Writer) MakeTrophyDropDue(ctx context.Context, now time.Time) (time.Time, error) {
-	var nextDrop time.Time
-	err := w.pool.QueryRow(ctx, `UPDATE trophy_drop_state SET next_drop_at=$1 WHERE id=1 RETURNING next_drop_at`, now).Scan(&nextDrop)
-	return nextDrop, err
+var trophyDefinitions = []trophyDefinition{
+	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50},
+	{TrophyPrize: TrophyPrize{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2}, Weight: 100, Cap: 50},
+	{TrophyPrize: TrophyPrize{ID: "besigned", Name: "BeSigned", Total: 2}, Weight: 100, Cap: 50},
+	{TrophyPrize: TrophyPrize{ID: "bear", Name: "Мишка", Total: 2}, Weight: 30, Cap: 5},
+	{TrophyPrize: TrophyPrize{ID: "liberty-figure-252202", Name: "LibertyFigure #252202", Total: 4}, Weight: 4, Cap: 1},
+	{TrophyPrize: TrophyPrize{ID: "candy-cane-162605", Name: "CandyCane #162605", Total: 4}, Weight: 4, Cap: 1},
+	{TrophyPrize: TrophyPrize{ID: "vice-cream-227533", Name: "ViceCream #227533", Total: 4}, Weight: 4, Cap: 1},
+	{TrophyPrize: TrophyPrize{ID: "vice-cream-428029", Name: "ViceCream #428029", Total: 4}, Weight: 4, Cap: 1},
+	{TrophyPrize: TrophyPrize{ID: "chill-flame-303522", Name: "ChillFlame #303522", Total: 4}, Weight: 4, Cap: 1},
 }
 
-func (w *Writer) ClaimDueTrophyPart(ctx context.Context, userID string, now time.Time) (*TrophyPrize, error) {
+var trophyLocation = time.FixedZone("Asia/Yekaterinburg", 5*60*60)
+
+// TrophyDropChance returns the chance for one successful placement. A quiet
+// board and off-peak hours deliberately make solo farming inefficient.
+func TrophyDropChance(now time.Time, online int64) float64 {
+	onlineMultiplier := 1.0
+	switch {
+	case online <= 1:
+		onlineMultiplier = 0.15
+	case online <= 4:
+		onlineMultiplier = 0.35
+	case online <= 9:
+		onlineMultiplier = 0.65
+	case online <= 24:
+		onlineMultiplier = 1
+	case online <= 49:
+		onlineMultiplier = 1.25
+	default:
+		onlineMultiplier = 1.5
+	}
+
+	hour := now.In(trophyLocation).Hour()
+	timeMultiplier := 0.35
+	switch {
+	case hour >= 6 && hour < 11:
+		timeMultiplier = 0.55
+	case hour >= 11 && hour < 18:
+		timeMultiplier = 1.15
+	case hour >= 18 && hour < 23:
+		timeMultiplier = 1.35
+	}
+	return 0.008 * onlineMultiplier * timeMultiplier
+}
+
+func (w *Writer) TrophyDropForced(ctx context.Context) (bool, error) {
+	var forced bool
+	err := w.pool.QueryRow(ctx, `SELECT force_next FROM trophy_drop_state WHERE id=1`).Scan(&forced)
+	return forced, err
+}
+
+// ForceNextTrophyDrop makes the next eligible pixel placement bypass the
+// probability roll once, while rarity and supply limits remain in force.
+func (w *Writer) ForceNextTrophyDrop(ctx context.Context) (bool, error) {
+	var forced bool
+	err := w.pool.QueryRow(ctx, `UPDATE trophy_drop_state SET force_next=true WHERE id=1 RETURNING force_next`).Scan(&forced)
+	return forced, err
+}
+
+func (w *Writer) ClaimTrophyPart(ctx context.Context, userID string, now time.Time, online int64) (*TrophyPrize, error) {
 	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var nextDrop time.Time
-	if err := tx.QueryRow(ctx, `SELECT next_drop_at FROM trophy_drop_state WHERE id=1 FOR UPDATE`).Scan(&nextDrop); err != nil {
+	var forced bool
+	if err := tx.QueryRow(ctx, `SELECT force_next FROM trophy_drop_state WHERE id=1 FOR UPDATE`).Scan(&forced); err != nil {
 		return nil, err
 	}
-	if now.Before(nextDrop) {
+	if !forced && rand.Float64() >= TrophyDropChance(now, online) {
 		return nil, tx.Commit(ctx)
 	}
 
@@ -449,39 +503,63 @@ func (w *Writer) ClaimDueTrophyPart(ctx context.Context, userID string, now time
 			return nil, fmt.Errorf("decode trophy prizes: %w", err)
 		}
 	}
-	definitions := []TrophyPrize{
-		{ID: "stickers", Name: "Стикеры", Total: 2},
-		{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2},
-		{ID: "besigned", Name: "BeSigned", Total: 2},
-		{ID: "bear", Name: "Мишка", Total: 2},
-		{ID: "liberty-figure-252202", Name: "LibertyFigure #252202", Total: 4},
-		{ID: "candy-cane-162605", Name: "CandyCane #162605", Total: 4},
-		{ID: "vice-cream-227533", Name: "ViceCream #227533", Total: 4},
-		{ID: "vice-cream-428029", Name: "ViceCream #428029", Total: 4},
-		{ID: "chill-flame-303522", Name: "ChillFlame #303522", Total: 4},
-	}
-	counts := make(map[string]int, len(definitions))
-	indexes := make(map[string]int, len(definitions))
+	counts := make(map[string]int, len(trophyDefinitions))
+	indexes := make(map[string]int, len(trophyDefinitions))
 	for index, prize := range prizes {
 		id, _ := prize["id"].(string)
 		value, _ := prize["collectedParts"].(float64)
 		counts[id] = int(value)
 		indexes[id] = index
 	}
-	candidates := make([]TrophyPrize, 0, len(definitions))
-	for _, definition := range definitions {
-		if counts[definition.ID] < definition.Total {
+	completed := make(map[string]int64, len(trophyDefinitions))
+	rows, err := tx.Query(ctx, `
+SELECT prize->>'id',COUNT(*)
+FROM profiles
+CROSS JOIN LATERAL jsonb_array_elements(prizes) AS prize
+WHERE jsonb_typeof(prize->'collectedParts')='number'
+  AND jsonb_typeof(prize->'total')='number'
+  AND (prize->>'collectedParts')::int >= (prize->>'total')::int
+GROUP BY prize->>'id'`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var count int64
+		if err := rows.Scan(&id, &count); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		completed[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	candidates := make([]trophyDefinition, 0, len(trophyDefinitions))
+	for _, definition := range trophyDefinitions {
+		if counts[definition.ID] < definition.Total && completed[definition.ID] < definition.Cap {
 			candidates = append(candidates, definition)
 		}
-	}
-	next := now.Add(time.Duration(600+rand.IntN(301)) * time.Second)
-	if _, err := tx.Exec(ctx, `UPDATE trophy_drop_state SET next_drop_at=$1 WHERE id=1`, next); err != nil {
-		return nil, err
 	}
 	if len(candidates) == 0 {
 		return nil, tx.Commit(ctx)
 	}
-	won := candidates[rand.IntN(len(candidates))]
+	totalWeight := 0
+	for _, candidate := range candidates {
+		totalWeight += candidate.Weight
+	}
+	draw := rand.IntN(totalWeight)
+	won := candidates[0]
+	for _, candidate := range candidates {
+		if draw < candidate.Weight {
+			won = candidate
+			break
+		}
+		draw -= candidate.Weight
+	}
 	won.CollectedParts = counts[won.ID] + 1
 	if index, ok := indexes[won.ID]; ok {
 		prizes[index]["name"] = won.Name
@@ -497,10 +575,15 @@ func (w *Writer) ClaimDueTrophyPart(ctx context.Context, userID string, now time
 	if _, err := tx.Exec(ctx, `UPDATE profiles SET prizes=$2,updated_at=NOW() WHERE telegram_id=$1`, userID, updated); err != nil {
 		return nil, err
 	}
+	if forced {
+		if _, err := tx.Exec(ctx, `UPDATE trophy_drop_state SET force_next=false WHERE id=1`); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return &won, nil
+	return &won.TrophyPrize, nil
 }
 
 func (w *Writer) LoadSnapshot(ctx context.Context, boardID string) ([]domain.BoardPixel, error) {
