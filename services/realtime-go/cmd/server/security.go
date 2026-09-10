@@ -175,7 +175,7 @@ func allowedMethods(path string) string {
 		return "GET, POST"
 	case "/api/admin/boards/main/size", "/api/admin/game/pause", "/api/admin/game/test-mode":
 		return "GET, PUT"
-	case "/api/boards/main/pixels", "/api/boards/items/ice/activate", "/api/boards/items/bomb/use", "/api/admin/boards/main/fill", "/api/admin/boards/main/image", "/api/admin/boards/main/clear", "/api/admin/boards/main/restore", "/api/admin/quests/reset", "/api/admin/items/grant":
+	case "/api/boards/main/pixels", "/api/boards/items/ice/activate", "/api/boards/items/bomb/use", "/api/admin/boards/main/fill", "/api/admin/boards/main/image", "/api/admin/boards/main/clear", "/api/admin/boards/main/restore", "/api/admin/quests/reset", "/api/admin/items/grant", "/api/admin/trophies/reset":
 		return "POST"
 	}
 	if strings.HasPrefix(path, "/api/profiles/") || strings.HasPrefix(path, "/api/boards/profiles/") {

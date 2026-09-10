@@ -128,6 +128,7 @@ func TestSecurityMiddleware(t *testing.T) {
 		{"trophy status", "GET", "/api/admin/trophies/drop", "", "Bearer secret", false, 204},
 		{"trophy force ready", "POST", "/api/admin/trophies/drop", `{}`, "Bearer secret", false, 204},
 		{"trophy method rejected", "PUT", "/api/admin/trophies/drop", `{}`, "Bearer secret", false, 405},
+		{"trophy reset", "POST", "/api/admin/trophies/reset", `{"userId":"123"}`, "Bearer secret", false, 204},
 		{"public inline map", "GET", "/inline-map.jpg", "", "", false, 204},
 		{"resize requires put", "POST", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 405},
 		{"resize put", "PUT", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 204},

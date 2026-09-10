@@ -358,6 +358,12 @@ def admin_trophies(chat_id: int, notice: str | None = None) -> None:
                     "callback_data": "admin:trophies:ready",
                 }
             ],
+            [
+                {
+                    "text": "Обнулить трофеи игрока",
+                    "callback_data": "admin:trophies:reset",
+                }
+            ],
             [{"text": "Обновить", "callback_data": "admin:trophies"}],
             [{"text": "Назад", "callback_data": "admin:category:game"}],
         ]
@@ -389,6 +395,16 @@ def reset_daily_quests(user_id: str | None = None) -> None:
     payload = {"userId": user_id} if user_id else {"all": True}
     response = realtime_request("POST", "/api/admin/quests/reset", json=payload)
     response.raise_for_status()
+
+
+def reset_player_trophies(user_id: int) -> bool:
+    response = realtime_request(
+        "POST", "/api/admin/trophies/reset", json={"userId": str(user_id)}
+    )
+    if response.status_code == 404:
+        return False
+    response.raise_for_status()
+    return True
 
 
 def grant_item(user_id: int, item: str, amount: int) -> dict[str, Any]:
@@ -916,6 +932,30 @@ def apply_admin_action(admin_id: int, chat_id: int, text: str) -> None:
                 "game",
                 "Не удалось сбросить квесты. Проверь доступность сервера.",
             )
+    elif action == "trophy_reset_user":
+        user_id, label = resolve_user(text)
+        if user_id is None:
+            pending_actions[pending_key] = "trophy_reset_user"
+            send_admin_prompt(
+                admin_id,
+                chat_id,
+                "Пользователь не найден. Отправь @username или Telegram ID ещё раз.",
+            )
+            return
+        try:
+            if not reset_player_trophies(user_id):
+                pending_actions[pending_key] = "trophy_reset_user"
+                send_admin_prompt(
+                    admin_id,
+                    chat_id,
+                    "Профиль не найден. Игрок должен хотя бы один раз открыть Mini App. Отправь другого игрока.",
+                )
+                return
+            admin_trophies(chat_id, f"Все трофеи и части обнулены для {label}.")
+        except requests.RequestException:
+            admin_trophies(
+                chat_id, "Не удалось обнулить трофеи. Проверь доступность сервера."
+            )
     elif isinstance(action, dict) and action.get("action") == "item_user":
         user_id, label = resolve_user(text)
         if user_id is None:
@@ -1089,6 +1129,14 @@ def handle_callback(callback: dict[str, Any]) -> None:
             )
         except requests.RequestException:
             admin_trophies(chat_id, "Не удалось снять ожидание.")
+        return
+    if action == "admin:trophies:reset":
+        pending_actions[(user_id, chat_id)] = "trophy_reset_user"
+        send_admin_prompt(
+            user_id,
+            chat_id,
+            "Отправь @username или Telegram ID игрока, которому нужно обнулить все трофеи.",
+        )
         return
     if action == "admin:toggle_admin_cooldown":
         admin_ids = [str(admin_id) for admin_id in ADMIN_IDS]

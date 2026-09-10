@@ -398,6 +398,11 @@ func (w *Writer) Prizes(ctx context.Context, telegramID string) (json.RawMessage
 	return json.RawMessage(prizes), nil
 }
 
+func (w *Writer) ResetTrophies(ctx context.Context, telegramID string) (bool, error) {
+	tag, err := w.pool.Exec(ctx, `UPDATE profiles SET prizes='[]'::jsonb,updated_at=NOW() WHERE telegram_id=$1`, telegramID)
+	return err == nil && tag.RowsAffected() == 1, err
+}
+
 type TrophyPrize struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`

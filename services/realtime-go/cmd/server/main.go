@@ -898,6 +898,38 @@ func main() {
 			"remainingSeconds": remainingSeconds,
 		})
 	})
+	http.HandleFunc("/api/admin/trophies/reset", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost || writer == nil {
+			http.Error(w, "trophy reset unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var request struct {
+			UserID string `json:"userId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.UserID == "" {
+			http.Error(w, "invalid trophy reset request", http.StatusBadRequest)
+			return
+		}
+		if _, err := strconv.ParseInt(request.UserID, 10, 64); err != nil {
+			http.Error(w, "invalid userId", http.StatusBadRequest)
+			return
+		}
+		reset, err := writer.ResetTrophies(r.Context(), request.UserID)
+		if err != nil {
+			log.Printf("trophy reset failed for user=%s: %v", request.UserID, err)
+			http.Error(w, "failed to reset trophies", http.StatusInternalServerError)
+			return
+		}
+		if !reset {
+			http.Error(w, "profile not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, map[string]any{"reset": true, "userId": request.UserID})
+	})
 	http.HandleFunc("/api/admin/game/pause", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
