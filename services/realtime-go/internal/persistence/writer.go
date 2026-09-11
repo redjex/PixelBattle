@@ -19,6 +19,7 @@ type Writer struct {
 
 type UserStats struct {
 	PlacedPixels         int64 `json:"placedPixels"`
+	BonusExperience      int64 `json:"bonusExperience"`
 	RepaintedPixels      int64 `json:"repaintedPixels"`
 	CurrentPixels        int64 `json:"currentPixels"`
 	DailyPlacedPixels    int64 `json:"dailyPlacedPixels"`
@@ -30,6 +31,7 @@ type UserStats struct {
 type Inventory struct {
 	Bombs           int64 `json:"bombs"`
 	Ice             int64 `json:"ice"`
+	Experience      int64 `json:"experience"`
 	FreezeRemaining int64 `json:"freezeRemaining"`
 }
 
@@ -148,9 +150,11 @@ CREATE TABLE IF NOT EXISTS player_items (
  user_id text PRIMARY KEY,
  bombs bigint NOT NULL DEFAULT 0 CHECK (bombs >= 0),
  ice bigint NOT NULL DEFAULT 0 CHECK (ice >= 0),
+ experience bigint NOT NULL DEFAULT 0 CHECK (experience >= 0),
  freeze_remaining integer NOT NULL DEFAULT 0 CHECK (freeze_remaining >= 0),
  updated_at timestamptz NOT NULL DEFAULT NOW()
 );
+ALTER TABLE player_items ADD COLUMN IF NOT EXISTS experience bigint NOT NULL DEFAULT 0 CHECK (experience >= 0);
 CREATE TABLE IF NOT EXISTS level_reward_claims (
  user_id text NOT NULL,
  level integer NOT NULL CHECK (level BETWEEN 1 AND 100),
@@ -229,8 +233,8 @@ func (w *Writer) Inventory(ctx context.Context, userID string) (Inventory, error
 		return Inventory{}, err
 	}
 	var inventory Inventory
-	err := w.pool.QueryRow(ctx, `SELECT bombs,ice,freeze_remaining FROM player_items WHERE user_id=$1`, userID).
-		Scan(&inventory.Bombs, &inventory.Ice, &inventory.FreezeRemaining)
+	err := w.pool.QueryRow(ctx, `SELECT bombs,ice,experience,freeze_remaining FROM player_items WHERE user_id=$1`, userID).
+		Scan(&inventory.Bombs, &inventory.Ice, &inventory.Experience, &inventory.FreezeRemaining)
 	return inventory, err
 }
 
@@ -249,9 +253,9 @@ func (w *Writer) GrantItem(ctx context.Context, userID, item string, amount int6
 	}
 	query := fmt.Sprintf(`INSERT INTO player_items(user_id,%s,updated_at) VALUES($1,$2,NOW())
 ON CONFLICT(user_id) DO UPDATE SET %s=player_items.%s+EXCLUDED.%s,updated_at=NOW()
-RETURNING bombs,ice,freeze_remaining`, column, column, column, column)
+RETURNING bombs,ice,experience,freeze_remaining`, column, column, column, column)
 	var inventory Inventory
-	err := w.pool.QueryRow(ctx, query, userID, amount).Scan(&inventory.Bombs, &inventory.Ice, &inventory.FreezeRemaining)
+	err := w.pool.QueryRow(ctx, query, userID, amount).Scan(&inventory.Bombs, &inventory.Ice, &inventory.Experience, &inventory.FreezeRemaining)
 	return inventory, err
 }
 
@@ -302,8 +306,8 @@ func (w *Writer) ClaimLevelReward(ctx context.Context, userID string, level int,
 		}
 	}
 	var inventory Inventory
-	if err = tx.QueryRow(ctx, `SELECT bombs,ice,freeze_remaining FROM player_items WHERE user_id=$1`, userID).
-		Scan(&inventory.Bombs, &inventory.Ice, &inventory.FreezeRemaining); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT bombs,ice,experience,freeze_remaining FROM player_items WHERE user_id=$1`, userID).
+		Scan(&inventory.Bombs, &inventory.Ice, &inventory.Experience, &inventory.FreezeRemaining); err != nil {
 		return Inventory{}, false, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -318,8 +322,8 @@ func (w *Writer) ActivateIce(ctx context.Context, userID string) (Inventory, boo
 	}
 	var inventory Inventory
 	err := w.pool.QueryRow(ctx, `UPDATE player_items SET ice=ice-1,freeze_remaining=freeze_remaining+1,updated_at=NOW()
-WHERE user_id=$1 AND ice>0 AND freeze_remaining=0 RETURNING bombs,ice,freeze_remaining`, userID).
-		Scan(&inventory.Bombs, &inventory.Ice, &inventory.FreezeRemaining)
+WHERE user_id=$1 AND ice>0 AND freeze_remaining=0 RETURNING bombs,ice,experience,freeze_remaining`, userID).
+		Scan(&inventory.Bombs, &inventory.Ice, &inventory.Experience, &inventory.FreezeRemaining)
 	if err == pgx.ErrNoRows {
 		current, loadErr := w.Inventory(ctx, userID)
 		return current, false, loadErr
@@ -333,8 +337,8 @@ func (w *Writer) ConsumeBomb(ctx context.Context, userID string) (Inventory, boo
 	}
 	var inventory Inventory
 	err := w.pool.QueryRow(ctx, `UPDATE player_items SET bombs=bombs-1,updated_at=NOW()
-WHERE user_id=$1 AND bombs>0 RETURNING bombs,ice,freeze_remaining`, userID).
-		Scan(&inventory.Bombs, &inventory.Ice, &inventory.FreezeRemaining)
+WHERE user_id=$1 AND bombs>0 RETURNING bombs,ice,experience,freeze_remaining`, userID).
+		Scan(&inventory.Bombs, &inventory.Ice, &inventory.Experience, &inventory.FreezeRemaining)
 	if err == pgx.ErrNoRows {
 		current, loadErr := w.Inventory(ctx, userID)
 		return current, false, loadErr
@@ -497,11 +501,16 @@ type NFTPlanStatus struct {
 
 type trophyDefinition struct {
 	TrophyPrize
-	Weight int
-	Cap    int64
+	Weight       int
+	Cap          int64
+	RewardItem   string
+	RewardAmount int64
 }
 
 var trophyDefinitions = []trophyDefinition{
+	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 100, Cap: 50, RewardItem: "experience", RewardAmount: 25},
+	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомба", Total: 1}, Weight: 100, Cap: 50, RewardItem: "bomb", RewardAmount: 1},
+	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозка", Total: 1}, Weight: 100, Cap: 50, RewardItem: "ice", RewardAmount: 1},
 	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50},
 	{TrophyPrize: TrophyPrize{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2}, Weight: 100, Cap: 50},
 	{TrophyPrize: TrophyPrize{ID: "besigned", Name: "BeSigned", Total: 2}, Weight: 100, Cap: 50},
@@ -868,6 +877,17 @@ WHERE trophy_id=$1 AND claimed_at IS NULL`, plannedID, now); err != nil {
 	if _, err := tx.Exec(ctx, `UPDATE profiles SET prizes=$2,updated_at=NOW() WHERE telegram_id=$1`, recipientID, updated); err != nil {
 		return nil, err
 	}
+	if won.RewardItem != "" && won.CollectedParts >= won.Total {
+		column := won.RewardItem
+		if column != "bomb" && column != "ice" && column != "experience" {
+			return nil, fmt.Errorf("unknown trophy reward item %q", column)
+		}
+		query := fmt.Sprintf(`INSERT INTO player_items(user_id,%s,updated_at) VALUES($1,$2,NOW())
+ON CONFLICT(user_id) DO UPDATE SET %s=player_items.%s+EXCLUDED.%s,updated_at=NOW()`, column, column, column, column)
+		if _, err := tx.Exec(ctx, query, recipientID, won.RewardAmount); err != nil {
+			return nil, err
+		}
+	}
 	if planned && won.Cap == 1 && won.CollectedParts >= won.Total {
 		if _, err := tx.Exec(ctx, `INSERT INTO trophy_nft_winners(trophy_id,user_id,assigned_at) VALUES($1,$2,$3) ON CONFLICT(trophy_id) DO NOTHING`, won.ID, recipientID, now); err != nil {
 			return nil, err
@@ -981,6 +1001,7 @@ WITH daily_cutoff AS (
 )
 SELECT
   (SELECT COUNT(*) FROM pixel_events WHERE user_id=$1),
+  COALESCE((SELECT experience FROM player_items WHERE user_id=$1),0),
   (SELECT COUNT(*) FROM pixel_events current_event
    WHERE current_event.user_id=$1 AND EXISTS (
      SELECT 1 FROM pixel_events previous_event
@@ -1004,6 +1025,7 @@ SELECT
   (SELECT COUNT(DISTINCT color) FROM pixel_events WHERE user_id=$1 AND created_at>=(SELECT value FROM daily_cutoff)),
   (SELECT COUNT(DISTINCT (board_id,x,y)) FROM pixel_events WHERE user_id=$1 AND created_at>=(SELECT value FROM daily_cutoff))`, userID).Scan(
 		&stats.PlacedPixels,
+		&stats.BonusExperience,
 		&stats.RepaintedPixels,
 		&stats.CurrentPixels,
 		&stats.DailyPlacedPixels,

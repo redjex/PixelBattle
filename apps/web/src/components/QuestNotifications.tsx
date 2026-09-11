@@ -35,7 +35,7 @@ export function QuestNotifications({ active: mapActive }: { active: boolean }) {
       try {
         const stats = await refreshStatistics(initData);
         const quests = getDailyQuests(stats, userId);
-        const playerLevel = getPlayerLevelProgress(stats.placedPixels).level;
+        const playerLevel = getPlayerLevelProgress(stats.placedPixels + (stats.bonusExperience ?? 0)).level;
         const doneNow = new Set(quests.filter((quest) => quest.done).map((quest) => quest.id));
         if (initializedRef.current && mayNotify && activeRef.current) {
           const newNotices: QuestNotice[] = quests
@@ -57,7 +57,7 @@ export function QuestNotifications({ active: mapActive }: { active: boolean }) {
     const cached = getCachedStatistics();
     if (cached) {
       completedRef.current = new Set(getDailyQuests(cached, userId).filter((quest) => quest.done).map((quest) => quest.id));
-      playerLevelRef.current = getPlayerLevelProgress(cached.placedPixels).level;
+      playerLevelRef.current = getPlayerLevelProgress(cached.placedPixels + (cached.bonusExperience ?? 0)).level;
       initializedRef.current = true;
     } else {
       void sync(false);

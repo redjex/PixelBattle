@@ -284,7 +284,7 @@ func main() {
 			http.Error(w, "failed to load player level", http.StatusServiceUnavailable)
 			return
 		}
-		currentLevel := playerLevel(stats.PlacedPixels)
+		currentLevel := playerLevel(stats.PlacedPixels + stats.BonusExperience)
 		if r.Method == http.MethodPost {
 			var request struct {
 				Level int `json:"level"`
@@ -522,7 +522,7 @@ func main() {
 		}
 		if writer == nil {
 			writeJSON(w, map[string]int64{
-				"placedPixels": 0, "repaintedPixels": 0, "currentPixels": 0,
+				"placedPixels": 0, "bonusExperience": 0, "repaintedPixels": 0, "currentPixels": 0,
 				"dailyPlacedPixels": 0, "dailyRepaintedPixels": 0,
 				"dailyColorsUsed": 0, "dailyUniqueCells": 0,
 			})

@@ -37,7 +37,7 @@ export function preloadRatingRewards(initData: string) {
 
 export function RatingScreen({ onBack }: Props) {
   const statistics = getCachedStatistics();
-  const calculated = getPlayerLevelProgress(statistics?.placedPixels ?? 0);
+  const calculated = getPlayerLevelProgress((statistics?.placedPixels ?? 0) + (statistics?.bonusExperience ?? 0));
   const [rewardState, setRewardState] = useState<RewardState | null>(cachedRatingRewards);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(cachedRatingRewards ? 'ready' : 'loading');
   const [claimingLevel, setClaimingLevel] = useState<number | null>(null);

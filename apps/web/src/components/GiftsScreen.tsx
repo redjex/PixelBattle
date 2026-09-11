@@ -20,9 +20,21 @@ type TrophyDefinition = {
   parts: TrophyPart[];
 };
 
-type TrophyRarity = 'legendary' | 'rare' | 'common';
+type TrophyRarity = 'legendary' | 'rare' | 'uncommon' | 'common';
 
 const TROPHIES: TrophyDefinition[] = [
+  {
+    id: 'experience', aliases: ['xp', 'experience', 'опыт'], name: 'Опыт +25', total: 1,
+    base: '', preview: '/assets/trophies/experience.svg?v=1', parts: [],
+  },
+  {
+    id: 'bomb', aliases: ['bomb', 'бомба'], name: 'Бомба', total: 1,
+    base: '', preview: '/assets/trophies/bomb.svg?v=1', parts: [],
+  },
+  {
+    id: 'ice', aliases: ['ice', 'freeze', 'заморозка'], name: 'Заморозка', total: 1,
+    base: '', preview: '/assets/trophies/ice.svg?v=1', parts: [],
+  },
   {
     id: 'yng-explrz', aliases: ['yng explrz', 'yng_explrz'], name: 'YNG EXPLRZ', total: 2,
     base: '/assets/trophies/yng-explrz-base.svg',
@@ -99,7 +111,8 @@ const TROPHY_CATALOG_GROUPS: { rarity: TrophyRarity; label: string; trophyIds: s
     ],
   },
   { rarity: 'rare', label: 'Редкие', trophyIds: ['bear'] },
-  { rarity: 'common', label: 'Обычные', trophyIds: ['yng-explrz', 'besigned', 'stickers'] },
+  { rarity: 'uncommon', label: 'Необычные', trophyIds: ['yng-explrz', 'besigned', 'stickers'] },
+  { rarity: 'common', label: 'Обычные', trophyIds: ['experience', 'bomb', 'ice'] },
 ];
 
 const FOUR_PART_PATHS = [

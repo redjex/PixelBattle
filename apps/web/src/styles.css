@@ -121,11 +121,12 @@ button { color: inherit; }
 .gifts-catalog-screen::after { content:""; position:absolute; z-index:2; right:0; bottom:0; left:0; height:145px; pointer-events:none; background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,.78) 38%,#fff 68%); -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); -webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 48%,#000 100%); mask-image:linear-gradient(to bottom,transparent 0%,#000 48%,#000 100%); }
 .trophy-catalog { position:absolute; z-index:1; inset:0; box-sizing:border-box; overflow-x:hidden; overflow-y:auto; padding:calc(192px + var(--tg-content-safe-area-inset-top, 0px)) 22px 160px; touch-action:pan-y; overscroll-behavior-y:contain; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .trophy-catalog::-webkit-scrollbar { display:none; }
-.trophy-rarity-section { --rarity-color:#8d8d8d; --rarity-shadow:rgba(80,80,80,.28); width:min(370px,100%); margin:0 auto 43px; }
+.trophy-rarity-section { --rarity-color:#8d8d8d; --rarity-text:#707070; --rarity-shadow:rgba(80,80,80,.28); width:min(370px,100%); margin:0 auto 43px; }
 .trophy-rarity-section:last-child { margin-bottom:8px; }
-.trophy-rarity-legendary { --rarity-color:#9147e8; --rarity-shadow:rgba(145,71,232,.42); }
-.trophy-rarity-rare { --rarity-color:#008efb; --rarity-shadow:rgba(0,142,251,.36); }
-.trophy-rarity-common { --rarity-color:#858585; --rarity-shadow:rgba(80,80,80,.28); }
+.trophy-rarity-legendary { --rarity-color:#9147e8; --rarity-text:#6d28b8; --rarity-shadow:rgba(145,71,232,.42); }
+.trophy-rarity-rare { --rarity-color:#008efb; --rarity-text:#0079d6; --rarity-shadow:rgba(0,142,251,.36); }
+.trophy-rarity-uncommon { --rarity-color:#35c84a; --rarity-text:#218d32; --rarity-shadow:rgba(53,200,74,.34); }
+.trophy-rarity-common { --rarity-color:#858585; --rarity-text:#707070; --rarity-shadow:rgba(80,80,80,.28); }
 .trophy-rarity-heading { width:100%; margin:0 0 26px; display:grid; grid-template-columns:16px auto minmax(24px,1fr); align-items:center; gap:9px; font-family:"Minecraft Rus",monospace; }
 .trophy-rarity-heading h2 { margin:0; padding:7px 11px 6px; border:3px solid #000; color:#fff; background:var(--rarity-color); box-shadow:3px 3px 0 #000; font:400 16px/1 "Minecraft Rus",monospace; letter-spacing:.2px; white-space:nowrap; }
 .trophy-rarity-mark { width:12px; height:12px; box-sizing:border-box; border:3px solid #000; background:var(--rarity-color); transform:rotate(45deg); image-rendering:pixelated; }
@@ -133,7 +134,7 @@ button { color: inherit; }
 .trophy-rarity-grid { display:grid; grid-template-columns:repeat(2,117px); grid-auto-rows:150px; justify-content:center; column-gap:clamp(28px,12vw,60px); row-gap:35px; }
 .trophy-rarity-grid > .trophy-item:last-child:nth-child(odd) { grid-column:1 / -1; justify-self:center; }
 .trophy-rarity-section .trophy-card { filter:drop-shadow(0 4px 0 var(--rarity-shadow)); }
-.trophy-rarity-section .trophy-name { color:var(--rarity-color); }
+.trophy-rarity-section .trophy-name { color:var(--rarity-text); }
 .trophy-item { width:117px; height:150px; text-align:center; }
 .trophy-card { position:relative; width:117px; height:117px; }
 .trophy-card-base { position:absolute; inset:-3px; width:123px; height:123px; display:block; max-width:none; }
@@ -148,10 +149,10 @@ button { color: inherit; }
 .trophy-part-snow-two-top { left:-2.6%; top:-2.6%; width:64.9%; height:51.5%; transform:rotate(180deg); }
 .trophy-part-right { left:29.7%; top:-2.6%; width:73%; height:105.2%; }
 .trophy-part-left { left:-2.6%; top:-2.6%; width:58.7%; height:105.2%; }
-.trophy-caption { margin-top:11px; display:flex; flex-direction:column; align-items:center; font-family:"Minecraft Rus",monospace; font-weight:400; line-height:15px; white-space:nowrap; }
+.trophy-caption { margin-top:15px; display:flex; flex-direction:column; align-items:center; font-family:"Minecraft Rus",monospace; font-weight:400; line-height:15px; white-space:nowrap; }
 .trophy-name { max-width:145px; color:#008efb; font-size:14px; line-height:15px; white-space:normal; overflow-wrap:anywhere; }
 .trophy-item-liberty-figure-252202 .trophy-name { max-width:none; font-size:11px; white-space:nowrap; overflow-wrap:normal; }
-.trophy-progress { color:#000; font-size:10px; }
+.trophy-progress { margin-top:2px; color:#000; font-size:10px; }
 .stats-content { position:absolute; inset:118px 20px 28px; overflow:auto; padding:18px 8px; }
 .stats-redesign { inset:0; padding:0 18px 150px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }
 .stats-top-cards { display:grid; grid-template-columns:1fr; gap:8px; margin:0 auto 16px; max-width:370px; }

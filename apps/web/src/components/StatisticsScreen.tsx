@@ -70,7 +70,7 @@ export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating }: Prop
   const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const username = user?.username ? `@${user.username}` : user?.first_name || 'Игрок';
   const avatar = user?.photo_url;
-  const { level, progress, pixelsToNextLevel } = getPlayerLevelProgress(stats.placedPixels);
+  const { level, progress, pixelsToNextLevel } = getPlayerLevelProgress(stats.placedPixels + (stats.bonusExperience ?? 0));
   const currentLevelReward = getLevelReward(level);
   const nextLevelReward = level < 100 ? getLevelReward(level + 1) : null;
   const [displayedProgress, setDisplayedProgress] = useState(0);
