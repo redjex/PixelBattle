@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .go-cache/
+.go-cache-*/
 .tmp-go-cache/
 bin/
 coverage/
@@ -17,4 +18,5 @@ build/
 yes
 yes.pub
 *.tar.gz
+.deploy-baseline/
 .DS_Store

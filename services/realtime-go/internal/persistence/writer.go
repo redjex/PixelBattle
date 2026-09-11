@@ -581,22 +581,53 @@ type trophyDefinition struct {
 	RewardItem   string
 	RewardAmount int64
 	Repeatable   bool
+	Rarity       string
 }
 
 var trophyDefinitions = []trophyDefinition{
-	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 100, Cap: 50, RewardItem: "experience", RewardAmount: 100},
-	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомба", Total: 1}, Weight: 100, Cap: 500, RewardItem: "bomb", RewardAmount: 5, Repeatable: true},
-	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозка", Total: 1}, Weight: 100, Cap: 500, RewardItem: "ice", RewardAmount: 1, Repeatable: true},
-	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50},
-	{TrophyPrize: TrophyPrize{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2}, Weight: 100, Cap: 50},
-	{TrophyPrize: TrophyPrize{ID: "besigned", Name: "BeSigned", Total: 2}, Weight: 100, Cap: 50},
-	{TrophyPrize: TrophyPrize{ID: "bear", Name: "Мишка", Total: 2}, Weight: 30, Cap: 20},
-	{TrophyPrize: TrophyPrize{ID: "bear-redjex", Name: "Мишка от redjex", Total: 2}, Weight: 30, Cap: 5},
-	{TrophyPrize: TrophyPrize{ID: "liberty-figure-252202", Name: "LibertyFigure #252202", Total: 4}, Weight: 4, Cap: 1},
-	{TrophyPrize: TrophyPrize{ID: "candy-cane-162605", Name: "CandyCane #162605", Total: 4}, Weight: 4, Cap: 1},
-	{TrophyPrize: TrophyPrize{ID: "vice-cream-227533", Name: "ViceCream #227533", Total: 4}, Weight: 4, Cap: 1},
-	{TrophyPrize: TrophyPrize{ID: "vice-cream-428029", Name: "ViceCream #428029", Total: 4}, Weight: 4, Cap: 1},
-	{TrophyPrize: TrophyPrize{ID: "chill-flame-303522", Name: "ChillFlame #303522", Total: 4}, Weight: 4, Cap: 1},
+	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 100, Cap: 50, RewardItem: "experience", RewardAmount: 100, Rarity: "common"},
+	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомба", Total: 1}, Weight: 100, Cap: 500, RewardItem: "bomb", RewardAmount: 5, Repeatable: true, Rarity: "common"},
+	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозка", Total: 1}, Weight: 100, Cap: 500, RewardItem: "ice", RewardAmount: 1, Repeatable: true, Rarity: "common"},
+	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
+	{TrophyPrize: TrophyPrize{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
+	{TrophyPrize: TrophyPrize{ID: "besigned", Name: "BeSigned", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
+	{TrophyPrize: TrophyPrize{ID: "bear", Name: "Мишка", Total: 2}, Weight: 30, Cap: 20, Rarity: "rare"},
+	{TrophyPrize: TrophyPrize{ID: "bear-redjex", Name: "Мишка от redjex", Total: 2}, Weight: 30, Cap: 5, Rarity: "rare"},
+	{TrophyPrize: TrophyPrize{ID: "liberty-figure-252202", Name: "LibertyFigure #252202", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
+	{TrophyPrize: TrophyPrize{ID: "candy-cane-162605", Name: "CandyCane #162605", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
+	{TrophyPrize: TrophyPrize{ID: "vice-cream-227533", Name: "ViceCream #227533", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
+	{TrophyPrize: TrophyPrize{ID: "vice-cream-428029", Name: "ViceCream #428029", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
+	{TrophyPrize: TrophyPrize{ID: "chill-flame-303522", Name: "ChillFlame #303522", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
+}
+
+// Per-account rarity caps: how many trophies of each rarity one account may
+// receive regardless of global supply. Planned legendary NFT drops are exempt.
+var trophyRarityAccountLimits = map[string]int{
+	"rare":     2,
+	"uncommon": 2,
+	"common":   10,
+}
+
+// trophyRarityReceived counts trophies an account has already received per
+// rarity: completed collections for one-shot trophies and every claim for
+// repeatable ones.
+func trophyRarityReceived(counts map[string]int, perUserClaims map[string]int64) map[string]int {
+	received := make(map[string]int, len(trophyRarityAccountLimits)+1)
+	for _, definition := range trophyDefinitions {
+		if definition.Repeatable {
+			received[definition.Rarity] += int(perUserClaims[definition.ID])
+			continue
+		}
+		if definition.Total > 0 && counts[definition.ID] >= definition.Total {
+			received[definition.Rarity]++
+		}
+	}
+	return received
+}
+
+func trophyAccountLimitReached(rarity string, received map[string]int) bool {
+	limit, ok := trophyRarityAccountLimits[rarity]
+	return ok && received[rarity] >= limit
 }
 
 var trophyLocation = time.FixedZone("Asia/Yekaterinburg", 5*60*60)
@@ -909,6 +940,27 @@ LIMIT 1`, plannedID, 4).Scan(&leaderID)
 	}
 	claimRows.Close()
 
+	perUserClaims := make(map[string]int64)
+	userClaimRows, err := tx.Query(ctx, `SELECT trophy_id,COUNT(*) FROM trophy_reward_claims WHERE user_id=$1 GROUP BY trophy_id`, recipientID)
+	if err != nil {
+		return nil, err
+	}
+	for userClaimRows.Next() {
+		var id string
+		var count int64
+		if err := userClaimRows.Scan(&id, &count); err != nil {
+			userClaimRows.Close()
+			return nil, err
+		}
+		perUserClaims[id] = count
+	}
+	if err := userClaimRows.Err(); err != nil {
+		userClaimRows.Close()
+		return nil, err
+	}
+	userClaimRows.Close()
+	rarityReceived := trophyRarityReceived(counts, perUserClaims)
+
 	candidates := make([]trophyDefinition, 0, len(trophyDefinitions))
 	for _, definition := range trophyDefinitions {
 		if planned && definition.ID != plannedID {
@@ -920,6 +972,9 @@ LIMIT 1`, plannedID, 4).Scan(&leaderID)
 		eligible := counts[definition.ID] < definition.Total && completed[definition.ID] < definition.Cap
 		if definition.Repeatable {
 			eligible = repeatableClaims[definition.ID] < definition.Cap
+		}
+		if eligible && trophyAccountLimitReached(definition.Rarity, rarityReceived) {
+			eligible = false
 		}
 		if eligible {
 			candidates = append(candidates, definition)

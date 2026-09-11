@@ -65,6 +65,79 @@ func TestTrophyRarityAndSupplyGrid(t *testing.T) {
 	}
 }
 
+func TestTrophyRarityGridMatchesDefinitions(t *testing.T) {
+	rarityByID := map[string]string{
+		"experience":            "common",
+		"bomb":                  "common",
+		"ice":                   "common",
+		"stickers":              "uncommon",
+		"yng-explrz":            "uncommon",
+		"besigned":              "uncommon",
+		"bear":                  "rare",
+		"bear-redjex":           "rare",
+		"liberty-figure-252202": "legendary",
+		"candy-cane-162605":     "legendary",
+		"vice-cream-227533":     "legendary",
+		"vice-cream-428029":     "legendary",
+		"chill-flame-303522":    "legendary",
+	}
+	for _, definition := range trophyDefinitions {
+		want, ok := rarityByID[definition.ID]
+		if !ok {
+			t.Fatalf("unknown trophy id %s in rarity grid", definition.ID)
+		}
+		if definition.Rarity != want {
+			t.Fatalf("trophy %s rarity = %q, want %q", definition.ID, definition.Rarity, want)
+		}
+	}
+}
+
+func TestTrophyRarityAccountLimits(t *testing.T) {
+	limits := map[string]int{"rare": 2, "uncommon": 2, "common": 10}
+	if len(trophyRarityAccountLimits) != len(limits) {
+		t.Fatalf("expected %d rarity limits, got %d", len(limits), len(trophyRarityAccountLimits))
+	}
+	for rarity, limit := range limits {
+		if trophyRarityAccountLimits[rarity] != limit {
+			t.Fatalf("limit for %s = %d, want %d", rarity, trophyRarityAccountLimits[rarity], limit)
+		}
+	}
+}
+
+func TestTrophyRarityReceivedCountsCompletedAndClaims(t *testing.T) {
+	counts := map[string]int{"bear": 2, "bear-redjex": 1, "stickers": 2, "yng-explrz": 1, "experience": 1, "bomb": 1, "liberty-figure-252202": 4}
+	claims := map[string]int64{"bomb": 3, "ice": 2}
+	received := trophyRarityReceived(counts, claims)
+	if received["rare"] != 1 {
+		t.Fatalf("rare received = %d, want 1 (bear completed, redjex partial)", received["rare"])
+	}
+	if received["uncommon"] != 1 {
+		t.Fatalf("uncommon received = %d, want 1 (stickers completed, yng-explrz partial)", received["uncommon"])
+	}
+	if received["common"] != 6 {
+		t.Fatalf("common received = %d, want 6 (experience + 3 bomb claims + 2 ice claims)", received["common"])
+	}
+	if received["legendary"] != 1 {
+		t.Fatalf("legendary received = %d, want 1", received["legendary"])
+	}
+}
+
+func TestTrophyAccountLimitReached(t *testing.T) {
+	received := map[string]int{"rare": 2, "uncommon": 1, "common": 10, "legendary": 5}
+	if !trophyAccountLimitReached("rare", received) {
+		t.Fatal("rare limit should be reached at 2")
+	}
+	if trophyAccountLimitReached("uncommon", received) {
+		t.Fatal("uncommon limit should not be reached at 1")
+	}
+	if !trophyAccountLimitReached("common", received) {
+		t.Fatal("common limit should be reached at 10")
+	}
+	if trophyAccountLimitReached("legendary", received) {
+		t.Fatal("legendary has no per-account limit")
+	}
+}
+
 func TestNFTOutcomePlanContainsEveryRequiredPart(t *testing.T) {
 	outcomes := shuffledNFTOutcomes(nftPartsPerCampaign)
 	if len(outcomes) != 100 {
