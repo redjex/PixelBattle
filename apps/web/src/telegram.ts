@@ -51,13 +51,25 @@ export type AppAccess = {
   prizes: unknown[];
 };
 
+export class TelegramAuthenticationError extends Error {
+  constructor() {
+    super('Telegram authentication failed');
+    this.name = 'TelegramAuthenticationError';
+  }
+}
+
+function ensureAvailable(response: Response) {
+  if (response.status === 401 || response.status === 403) throw new TelegramAuthenticationError();
+  if (!response.ok) throw new Error(`Telegram service unavailable: ${response.status}`);
+}
+
 export async function fetchAppAccess(initData: string): Promise<AppAccess> {
   const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
   const response = await fetch(`${apiUrl}/api/boards/session`, {
     cache: 'no-store',
     headers: { 'X-Telegram-Init-Data': initData },
   });
-  if (!response.ok) throw new Error(`Access request failed: ${response.status}`);
+  ensureAvailable(response);
   const payload = await response.json() as Partial<AppAccess>;
   const testMode = payload.testMode === true;
   const isAdmin = payload.isAdmin === true;
@@ -69,6 +81,7 @@ export async function fetchAppAccess(initData: string): Promise<AppAccess> {
 export async function authenticateTelegram(initData: string): Promise<AppAccess | null> {
   const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
   const response = await fetch(`${apiUrl}/api/auth/telegram`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: initData }) });
-  if (!response.ok) return null;
+  if (response.status === 401 || response.status === 403) return null;
+  ensureAvailable(response);
   return fetchAppAccess(initData);
 }

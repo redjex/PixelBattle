@@ -4,7 +4,7 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { MainMenu } from './components/MainMenu';
 import { StatisticsScreen } from './components/StatisticsScreen';
 import { AgreementScreen } from './components/AgreementScreen';
-import { authenticateTelegram, fetchAppAccess, getTelegramWebApp, type AppAccess } from './telegram';
+import { authenticateTelegram, fetchAppAccess, getTelegramWebApp, TelegramAuthenticationError, type AppAccess } from './telegram';
 import { preloadBoardSnapshot } from './boardSnapshot';
 import { preloadStatistics } from './statisticsCache';
 import { QuestNotifications } from './components/QuestNotifications';
@@ -98,20 +98,45 @@ export function App() {
     // The method is optional because older Telegram clients do not expose it.
     telegram.disableVerticalSwipes?.();
     telegram.expand();
-    authenticateTelegram(telegram.initData).then((access) => {
-      if (access?.accessAllowed) {
-        void preloadBoardSnapshot(telegram.initData).catch(() => undefined);
-        void preloadStatistics(telegram.initData).catch(() => undefined);
-        void preloadRatingRewards(telegram.initData).catch(() => undefined);
-         const avatarUrl = telegram.initDataUnsafe?.user?.photo_url;
-         if (avatarUrl && avatarUrl.startsWith('https://')) {
-          const avatar = new Image();
-          avatar.src = avatarUrl;
+    let active = true;
+    let retryTimer = 0;
+    let failedAttempts = 0;
+    const authenticate = async () => {
+      try {
+        const access = await authenticateTelegram(telegram.initData);
+        if (!active) return;
+        if (!access) {
+          setAuthState('invalid');
+          return;
         }
+        if (access.accessAllowed) {
+          void preloadBoardSnapshot(telegram.initData).catch(() => undefined);
+          void preloadStatistics(telegram.initData).catch(() => undefined);
+          void preloadRatingRewards(telegram.initData).catch(() => undefined);
+          const avatarUrl = telegram.initDataUnsafe?.user?.photo_url;
+          if (avatarUrl && avatarUrl.startsWith('https://')) {
+            const avatar = new Image();
+            avatar.src = avatarUrl;
+          }
+        }
+        setAppAccess(access);
+        setAuthState('authorized');
+      } catch (error) {
+        if (!active) return;
+        if (error instanceof TelegramAuthenticationError) {
+          setAuthState('invalid');
+          return;
+        }
+        failedAttempts += 1;
+        const delay = Math.min(4000, 500 * 2 ** Math.min(failedAttempts - 1, 3));
+        retryTimer = window.setTimeout(() => void authenticate(), delay);
       }
-      setAppAccess(access);
-      setAuthState(access ? 'authorized' : 'invalid');
-    }).catch(() => setAuthState('invalid'));
+    };
+    void authenticate();
+    return () => {
+      active = false;
+      window.clearTimeout(retryTimer);
+    };
   }, []);
 
   useEffect(() => {
