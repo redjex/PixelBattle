@@ -25,8 +25,8 @@ type TrophyRarity = 'legendary' | 'rare' | 'uncommon' | 'common';
 
 const TROPHIES: TrophyDefinition[] = [
   {
-    id: 'experience', aliases: ['xp', 'experience', 'опыт'], name: 'Опыт +25', total: 1,
-    base: '', icon: '/assets/exp.svg?v=1', parts: [],
+    id: 'experience', aliases: ['xp', 'experience', 'опыт'], name: 'Опыт +100', total: 1,
+    base: '', icon: '/assets/exp.svg?v=2', parts: [],
   },
   {
     id: 'bomb', aliases: ['bomb', 'бомба'], name: 'Бомба', total: 1,

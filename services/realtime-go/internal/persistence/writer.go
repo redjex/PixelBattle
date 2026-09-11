@@ -520,7 +520,7 @@ type trophyDefinition struct {
 }
 
 var trophyDefinitions = []trophyDefinition{
-	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 100, Cap: 50, RewardItem: "experience", RewardAmount: 25},
+	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 100, Cap: 50, RewardItem: "experience", RewardAmount: 100},
 	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомба", Total: 1}, Weight: 100, Cap: 500, RewardItem: "bomb", RewardAmount: 5, Repeatable: true},
 	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозка", Total: 1}, Weight: 100, Cap: 500, RewardItem: "ice", RewardAmount: 1, Repeatable: true},
 	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50},
