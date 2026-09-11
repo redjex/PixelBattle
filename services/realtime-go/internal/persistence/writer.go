@@ -199,6 +199,20 @@ CREATE TABLE IF NOT EXISTS trophy_reward_claims (
  claimed_at timestamptz NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS trophy_reward_claims_trophy_id_idx ON trophy_reward_claims(trophy_id);
+CREATE TABLE IF NOT EXISTS trophy_winners (
+ trophy_id text NOT NULL,
+ user_id text NOT NULL,
+ completed_at timestamptz NOT NULL DEFAULT NOW(),
+ PRIMARY KEY (trophy_id,user_id)
+);
+INSERT INTO trophy_winners(trophy_id,user_id)
+SELECT prize->>'id',profiles.telegram_id
+FROM profiles
+CROSS JOIN LATERAL jsonb_array_elements(prizes) AS prize
+WHERE jsonb_typeof(prize->'collectedParts')='number'
+  AND jsonb_typeof(prize->'total')='number'
+  AND (prize->>'collectedParts')::int >= (prize->>'total')::int
+ON CONFLICT DO NOTHING;
 DELETE FROM trophy_nft_winners AS winner
 WHERE NOT EXISTS (
  SELECT 1
@@ -442,6 +456,53 @@ func (w *Writer) Prizes(ctx context.Context, telegramID string) (json.RawMessage
 	return json.RawMessage(prizes), nil
 }
 
+func (w *Writer) SoldOutTrophies(ctx context.Context) ([]string, error) {
+	counts := make(map[string]int64, len(trophyDefinitions))
+	rows, err := w.pool.Query(ctx, `SELECT trophy_id,COUNT(*) FROM trophy_winners GROUP BY trophy_id`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var count int64
+		if err := rows.Scan(&id, &count); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		counts[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	rows, err = w.pool.Query(ctx, `SELECT trophy_id,COUNT(*) FROM trophy_reward_claims GROUP BY trophy_id`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var count int64
+		if err := rows.Scan(&id, &count); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		counts[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	soldOut := make([]string, 0)
+	for _, definition := range trophyDefinitions {
+		if counts[definition.ID] >= definition.Cap {
+			soldOut = append(soldOut, definition.ID)
+		}
+	}
+	return soldOut, nil
+}
+
 func (w *Writer) ResetTrophies(ctx context.Context, telegramID string) (bool, error) {
 	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -475,6 +536,9 @@ func (w *Writer) ResetTrophies(ctx context.Context, telegramID string) (bool, er
 		return false, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM trophy_reward_claims WHERE user_id=$1`, telegramID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM trophy_winners WHERE user_id=$1`, telegramID); err != nil {
 		return false, err
 	}
 	for _, trophyID := range plannedTrophies {
@@ -526,7 +590,8 @@ var trophyDefinitions = []trophyDefinition{
 	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50},
 	{TrophyPrize: TrophyPrize{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2}, Weight: 100, Cap: 50},
 	{TrophyPrize: TrophyPrize{ID: "besigned", Name: "BeSigned", Total: 2}, Weight: 100, Cap: 50},
-	{TrophyPrize: TrophyPrize{ID: "bear", Name: "Мишка", Total: 2}, Weight: 30, Cap: 5},
+	{TrophyPrize: TrophyPrize{ID: "bear", Name: "Мишка", Total: 2}, Weight: 30, Cap: 20},
+	{TrophyPrize: TrophyPrize{ID: "bear-redjex", Name: "Мишка от redjex", Total: 2}, Weight: 30, Cap: 5},
 	{TrophyPrize: TrophyPrize{ID: "liberty-figure-252202", Name: "LibertyFigure #252202", Total: 4}, Weight: 4, Cap: 1},
 	{TrophyPrize: TrophyPrize{ID: "candy-cane-162605", Name: "CandyCane #162605", Total: 4}, Weight: 4, Cap: 1},
 	{TrophyPrize: TrophyPrize{ID: "vice-cream-227533", Name: "ViceCream #227533", Total: 4}, Weight: 4, Cap: 1},
@@ -806,14 +871,7 @@ LIMIT 1`, plannedID, 4).Scan(&leaderID)
 		}
 	}
 	completed := make(map[string]int64, len(trophyDefinitions))
-	rows, err := tx.Query(ctx, `
-SELECT prize->>'id',COUNT(*)
-FROM profiles
-CROSS JOIN LATERAL jsonb_array_elements(prizes) AS prize
-WHERE jsonb_typeof(prize->'collectedParts')='number'
-  AND jsonb_typeof(prize->'total')='number'
-  AND (prize->>'collectedParts')::int >= (prize->>'total')::int
-GROUP BY prize->>'id'`)
+	rows, err := tx.Query(ctx, `SELECT trophy_id,COUNT(*) FROM trophy_winners GROUP BY trophy_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -926,6 +984,11 @@ ON CONFLICT(user_id) DO UPDATE SET %s=player_items.%s+EXCLUDED.%s,updated_at=NOW
 			if _, err := tx.Exec(ctx, `INSERT INTO trophy_reward_claims(trophy_id,user_id,amount,claimed_at) VALUES($1,$2,$3,$4)`, won.ID, recipientID, won.RewardAmount, now); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if !won.Repeatable && won.CollectedParts >= won.Total {
+		if _, err := tx.Exec(ctx, `INSERT INTO trophy_winners(trophy_id,user_id,completed_at) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, won.ID, recipientID, now); err != nil {
+			return nil, err
 		}
 	}
 	if planned && won.Cap == 1 && won.CollectedParts >= won.Total {

@@ -259,14 +259,20 @@ func main() {
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
 		inventory := persistence.Inventory{}
 		prizes := json.RawMessage("[]")
+		soldOutTrophies := []string{}
 		if writer != nil {
 			identity := strconv.FormatInt(telegramUser.ID, 10)
 			inventory, _ = writer.Inventory(r.Context(), identity)
 			if storedPrizes, err := writer.Prizes(r.Context(), identity); err == nil {
 				prizes = storedPrizes
 			}
+			if soldOut, err := writer.SoldOutTrophies(r.Context()); err == nil {
+				soldOutTrophies = soldOut
+			} else {
+				log.Printf("trophy availability failed: %v", err)
+			}
 		}
-		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "prizes": prizes, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true})
+		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "prizes": prizes, "soldOutTrophies": soldOutTrophies, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true})
 	})
 	http.HandleFunc("/api/boards/main/rewards", func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)

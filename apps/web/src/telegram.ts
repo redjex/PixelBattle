@@ -49,6 +49,7 @@ export type AppAccess = {
   accessAllowed: boolean;
   online: number | null;
   prizes: unknown[];
+  soldOutTrophies: string[];
 };
 
 export class TelegramAuthenticationError extends Error {
@@ -75,7 +76,10 @@ export async function fetchAppAccess(initData: string): Promise<AppAccess> {
   const isAdmin = payload.isAdmin === true;
   const online = typeof payload.online === 'number' && Number.isFinite(payload.online) ? Math.max(0, payload.online) : null;
   const prizes = Array.isArray(payload.prizes) ? payload.prizes : [];
-  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online, prizes };
+  const soldOutTrophies = Array.isArray(payload.soldOutTrophies)
+    ? payload.soldOutTrophies.filter((id): id is string => typeof id === 'string')
+    : [];
+  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online, prizes, soldOutTrophies };
 }
 
 export async function authenticateTelegram(initData: string): Promise<AppAccess | null> {

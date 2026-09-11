@@ -1,7 +1,7 @@
 import { TgsPlayer } from './TgsPlayer';
 
 type Props = { onBack: () => void; onOpenCatalog: () => void; prizes: unknown[] };
-type CatalogProps = { onBack: () => void; prizes: unknown[] };
+type CatalogProps = { onBack: () => void; prizes: unknown[]; soldOutTrophies: string[] };
 
 type TrophyPart = {
   src: string;
@@ -73,6 +73,12 @@ const TROPHIES: TrophyDefinition[] = [
     ],
   },
   {
+    id: 'bear-redjex', aliases: ['bear redjex', 'мишка redjex', 'мишка от redjex'],
+    name: 'Мишка от redjex', total: 2, base: '',
+    preview: '/assets/trophies/bear-redjex.png?v=1',
+    puzzleImage: '/assets/trophies/bear-redjex.png?v=1', parts: [],
+  },
+  {
     id: 'liberty-figure-252202', aliases: ['libertyfigure 252202', 'liberty figure 252202'],
     name: 'LibertyFigure #252202', total: 4, base: '',
     preview: '/assets/trophies/png/5.png', puzzleImage: '/assets/trophies/png/5.png', parts: [],
@@ -111,7 +117,7 @@ const TROPHY_CATALOG_GROUPS: { rarity: TrophyRarity; label: string; trophyIds: s
       'chill-flame-303522',
     ],
   },
-  { rarity: 'rare', label: 'Редкие', trophyIds: ['bear'] },
+  { rarity: 'rare', label: 'Редкие', trophyIds: ['bear', 'bear-redjex'] },
   { rarity: 'uncommon', label: 'Необычные', trophyIds: ['yng-explrz', 'besigned', 'stickers'] },
   { rarity: 'common', label: 'Обычные', trophyIds: ['experience', 'bomb', 'ice'] },
 ];
@@ -143,6 +149,33 @@ function FourPartTrophyCard({ image, collected, title }: { image: string; collec
             <image href={image} x="1.5" y="1.5" width="121" height="121" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipPrefix}-part-${index + 1})`} />
           )}
           <path d={path} transform={FOUR_PART_TRANSFORMS[index]} fill="none" stroke="#000" strokeWidth="3" strokeLinejoin="round" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+const TWO_PART_PATHS = [
+  'M7 1.5H62V47H68V43H80V47H84V61H80V65H68V61H62V122.5H7V118.5H2.5V5.5H7V1.5Z',
+  'M62 1.5H117V5.5H121.5V118.5H117V122.5H62V61H68V65H80V61H84V47H80V43H68V47H62V1.5Z',
+] as const;
+
+function TwoPartTrophyCard({ image, collected, title }: { image: string; collected: Set<number>; title: string }) {
+  const clipPrefix = `trophy-two-${image.replace(/\W/g, '')}`;
+  return (
+    <svg className="trophy-four-part-card" viewBox="0 0 124 124" role="img" aria-label={title}>
+      <defs>
+        {TWO_PART_PATHS.map((path, index) => (
+          <clipPath id={`${clipPrefix}-part-${index + 1}`} key={`clip-${index + 1}`}><path d={path} /></clipPath>
+        ))}
+      </defs>
+      {TWO_PART_PATHS.map((path, index) => (
+        <g key={`part-${index + 1}`}>
+          <path d={path} fill="#c6c6c6" />
+          {collected.has(index + 1) && (
+            <image href={image} x="2.5" y="1.5" width="119" height="121" preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipPrefix}-part-${index + 1})`} />
+          )}
+          <path d={path} fill="none" stroke="#000" strokeWidth="3" strokeLinejoin="round" />
         </g>
       ))}
     </svg>
@@ -278,6 +311,8 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
                         ) : (
                           <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
                         )
+                      ) : trophy.puzzleImage && trophy.total === 2 ? (
+                        <TwoPartTrophyCard image={trophy.puzzleImage} collected={collected} title={trophy.name} />
                       ) : trophy.puzzleImage ? (
                         <FourPartTrophyCard image={trophy.puzzleImage} collected={collected} title={trophy.name} />
                       ) : (
@@ -309,12 +344,16 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
   );
 }
 
-export function GiftsCatalogScreen({ onBack, prizes }: CatalogProps) {
+export function GiftsCatalogScreen({ onBack, prizes, soldOutTrophies }: CatalogProps) {
+  const soldOut = new Set(soldOutTrophies);
+  const availableGroups = TROPHY_CATALOG_GROUPS
+    .map((group) => ({ ...group, trophyIds: group.trophyIds.filter((id) => !soldOut.has(id)) }))
+    .filter((group) => group.trophyIds.length > 0);
   return (
     <div className="gifts-catalog-screen">
       <img className="gifts-logo" src="/assets/present.png?v=2" alt="Доступные награды" />
       <section className="trophy-catalog" aria-label="Полный список доступных наград">
-        {TROPHY_CATALOG_GROUPS.map((group) => (
+        {availableGroups.map((group) => (
           <section className={`trophy-rarity-section trophy-rarity-${group.rarity}`} key={group.rarity}>
             <header className="trophy-rarity-heading">
               <span className="trophy-rarity-mark" aria-hidden="true" />

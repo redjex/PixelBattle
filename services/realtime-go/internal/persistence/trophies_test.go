@@ -27,8 +27,8 @@ func TestTrophyDropChanceUsesOnlineAndLocalTime(t *testing.T) {
 }
 
 func TestTrophyRarityAndSupplyGrid(t *testing.T) {
-	if len(trophyDefinitions) != 12 {
-		t.Fatalf("expected 12 trophy definitions, got %d", len(trophyDefinitions))
+	if len(trophyDefinitions) != 13 {
+		t.Fatalf("expected 13 trophy definitions, got %d", len(trophyDefinitions))
 	}
 	for _, definition := range trophyDefinitions {
 		switch definition.ID {
@@ -37,8 +37,12 @@ func TestTrophyRarityAndSupplyGrid(t *testing.T) {
 				t.Fatalf("invalid promo settings for %s: weight=%d cap=%d", definition.ID, definition.Weight, definition.Cap)
 			}
 		case "bear":
-			if definition.Weight != 30 || definition.Cap != 5 {
+			if definition.Weight != 30 || definition.Cap != 20 {
 				t.Fatalf("invalid bear settings: weight=%d cap=%d", definition.Weight, definition.Cap)
+			}
+		case "bear-redjex":
+			if definition.Weight != 30 || definition.Cap != 5 || definition.Total != 2 {
+				t.Fatalf("invalid redjex bear settings: weight=%d cap=%d parts=%d", definition.Weight, definition.Cap, definition.Total)
 			}
 		case "experience", "bomb", "ice":
 			if definition.Weight != 100 || definition.Total != 1 || definition.RewardAmount <= 0 {
