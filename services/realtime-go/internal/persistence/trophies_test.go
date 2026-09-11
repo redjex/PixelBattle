@@ -41,8 +41,17 @@ func TestTrophyRarityAndSupplyGrid(t *testing.T) {
 				t.Fatalf("invalid bear settings: weight=%d cap=%d", definition.Weight, definition.Cap)
 			}
 		case "experience", "bomb", "ice":
-			if definition.Weight != 100 || definition.Cap != 50 || definition.Total != 1 || definition.RewardAmount <= 0 {
+			if definition.Weight != 100 || definition.Total != 1 || definition.RewardAmount <= 0 {
 				t.Fatalf("invalid common reward settings for %s: weight=%d cap=%d parts=%d amount=%d", definition.ID, definition.Weight, definition.Cap, definition.Total, definition.RewardAmount)
+			}
+			if definition.ID == "experience" && (definition.Cap != 50 || definition.Repeatable || definition.RewardAmount != 25) {
+				t.Fatalf("invalid experience settings: %+v", definition)
+			}
+			if definition.ID == "bomb" && (definition.Cap != 500 || !definition.Repeatable || definition.RewardAmount != 5) {
+				t.Fatalf("invalid bomb settings: %+v", definition)
+			}
+			if definition.ID == "ice" && (definition.Cap != 500 || !definition.Repeatable || definition.RewardAmount != 1) {
+				t.Fatalf("invalid ice settings: %+v", definition)
 			}
 		default:
 			if definition.Weight != 4 || definition.Cap != 1 || definition.Total != 4 {

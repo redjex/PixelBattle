@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 124 124">
-  <rect width="124" height="124" fill="#eeeeee"/>
-  <rect x="9" y="9" width="106" height="106" fill="#d7d7d7"/>
-  <image href="../ice.svg" x="27" y="23" width="70" height="70" image-rendering="pixelated"/>
-  <text x="62" y="108" text-anchor="middle" font-family="monospace" font-size="20" font-weight="700" fill="#000">x1</text>
-  <path d="M7 1.5H117V5.5H121.5V118.5H117V122.5H7V118.5H2.5V5.5H7V1.5Z" fill="none" stroke="#000" stroke-width="3"/>
-</svg>

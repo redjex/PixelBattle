@@ -191,6 +191,14 @@ CREATE TABLE IF NOT EXISTS trophy_nft_winners (
  user_id text NOT NULL,
 	assigned_at timestamptz NOT NULL DEFAULT NOW()
 );
+CREATE TABLE IF NOT EXISTS trophy_reward_claims (
+ claim_id bigserial PRIMARY KEY,
+ trophy_id text NOT NULL,
+ user_id text NOT NULL,
+ amount bigint NOT NULL CHECK (amount > 0),
+ claimed_at timestamptz NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS trophy_reward_claims_trophy_id_idx ON trophy_reward_claims(trophy_id);
 DELETE FROM trophy_nft_winners AS winner
 WHERE NOT EXISTS (
  SELECT 1
@@ -466,6 +474,9 @@ func (w *Writer) ResetTrophies(ctx context.Context, telegramID string) (bool, er
 	if err != nil || tag.RowsAffected() != 1 {
 		return false, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM trophy_reward_claims WHERE user_id=$1`, telegramID); err != nil {
+		return false, err
+	}
 	for _, trophyID := range plannedTrophies {
 		if _, err := tx.Exec(ctx, `UPDATE trophy_nft_plan SET claimed_at=NULL,winner_user_id=NULL WHERE trophy_id=$1`, trophyID); err != nil {
 			return false, err
@@ -505,12 +516,13 @@ type trophyDefinition struct {
 	Cap          int64
 	RewardItem   string
 	RewardAmount int64
+	Repeatable   bool
 }
 
 var trophyDefinitions = []trophyDefinition{
 	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 100, Cap: 50, RewardItem: "experience", RewardAmount: 25},
-	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомба", Total: 1}, Weight: 100, Cap: 50, RewardItem: "bomb", RewardAmount: 1},
-	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозка", Total: 1}, Weight: 100, Cap: 50, RewardItem: "ice", RewardAmount: 1},
+	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомба", Total: 1}, Weight: 100, Cap: 500, RewardItem: "bomb", RewardAmount: 5, Repeatable: true},
+	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозка", Total: 1}, Weight: 100, Cap: 500, RewardItem: "ice", RewardAmount: 1, Repeatable: true},
 	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50},
 	{TrophyPrize: TrophyPrize{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2}, Weight: 100, Cap: 50},
 	{TrophyPrize: TrophyPrize{ID: "besigned", Name: "BeSigned", Total: 2}, Weight: 100, Cap: 50},
@@ -819,6 +831,25 @@ GROUP BY prize->>'id'`)
 		return nil, err
 	}
 	rows.Close()
+	repeatableClaims := make(map[string]int64)
+	claimRows, err := tx.Query(ctx, `SELECT trophy_id,COUNT(*) FROM trophy_reward_claims GROUP BY trophy_id`)
+	if err != nil {
+		return nil, err
+	}
+	for claimRows.Next() {
+		var id string
+		var count int64
+		if err := claimRows.Scan(&id, &count); err != nil {
+			claimRows.Close()
+			return nil, err
+		}
+		repeatableClaims[id] = count
+	}
+	if err := claimRows.Err(); err != nil {
+		claimRows.Close()
+		return nil, err
+	}
+	claimRows.Close()
 
 	candidates := make([]trophyDefinition, 0, len(trophyDefinitions))
 	for _, definition := range trophyDefinitions {
@@ -828,7 +859,11 @@ GROUP BY prize->>'id'`)
 		if !planned && definition.Cap == 1 {
 			continue
 		}
-		if counts[definition.ID] < definition.Total && completed[definition.ID] < definition.Cap {
+		eligible := counts[definition.ID] < definition.Total && completed[definition.ID] < definition.Cap
+		if definition.Repeatable {
+			eligible = repeatableClaims[definition.ID] < definition.Cap
+		}
+		if eligible {
 			candidates = append(candidates, definition)
 		}
 	}
@@ -862,7 +897,7 @@ WHERE trophy_id=$1 AND claimed_at IS NULL`, plannedID, now); err != nil {
 		}
 		draw -= candidate.Weight
 	}
-	won.CollectedParts = counts[won.ID] + 1
+	won.CollectedParts = min(counts[won.ID]+1, won.Total)
 	if index, ok := indexes[won.ID]; ok {
 		prizes[index]["name"] = won.Name
 		prizes[index]["collectedParts"] = won.CollectedParts
@@ -886,6 +921,11 @@ WHERE trophy_id=$1 AND claimed_at IS NULL`, plannedID, now); err != nil {
 ON CONFLICT(user_id) DO UPDATE SET %s=player_items.%s+EXCLUDED.%s,updated_at=NOW()`, column, column, column, column)
 		if _, err := tx.Exec(ctx, query, recipientID, won.RewardAmount); err != nil {
 			return nil, err
+		}
+		if won.Repeatable {
+			if _, err := tx.Exec(ctx, `INSERT INTO trophy_reward_claims(trophy_id,user_id,amount,claimed_at) VALUES($1,$2,$3,$4)`, won.ID, recipientID, won.RewardAmount, now); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if planned && won.Cap == 1 && won.CollectedParts >= won.Total {

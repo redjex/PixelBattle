@@ -17,6 +17,7 @@ type TrophyDefinition = {
   base: string;
   preview?: string;
   puzzleImage?: string;
+  icon?: string;
   parts: TrophyPart[];
 };
 
@@ -25,15 +26,15 @@ type TrophyRarity = 'legendary' | 'rare' | 'uncommon' | 'common';
 const TROPHIES: TrophyDefinition[] = [
   {
     id: 'experience', aliases: ['xp', 'experience', 'опыт'], name: 'Опыт +25', total: 1,
-    base: '', preview: '/assets/trophies/experience.svg?v=1', parts: [],
+    base: '', icon: '/assets/exp.svg?v=1', parts: [],
   },
   {
     id: 'bomb', aliases: ['bomb', 'бомба'], name: 'Бомба', total: 1,
-    base: '', preview: '/assets/trophies/bomb.svg?v=1', parts: [],
+    base: '', icon: '/assets/bomb.svg', parts: [],
   },
   {
     id: 'ice', aliases: ['ice', 'freeze', 'заморозка'], name: 'Заморозка', total: 1,
-    base: '', preview: '/assets/trophies/ice.svg?v=1', parts: [],
+    base: '', icon: '/assets/ice.svg', parts: [],
   },
   {
     id: 'yng-explrz', aliases: ['yng explrz', 'yng_explrz'], name: 'YNG EXPLRZ', total: 2,
@@ -164,6 +165,16 @@ function FramedTrophyPreview({ image, title }: { image: string; title: string })
   );
 }
 
+function SinglePartTrophyCard({ icon, title }: { icon: string; title: string }) {
+  const framePath = 'M7 1.5H117V5.5H121.5V118.5H117V122.5H7V118.5H2.5V5.5H7V1.5Z';
+  return (
+    <svg className="trophy-card-preview trophy-single-part-card" viewBox="0 0 124 124" role="img" aria-label={title}>
+      <path d={framePath} fill="#d7d7d7" stroke="#000" strokeWidth="3" strokeLinejoin="miter" />
+      <image href={icon} x="27" y="27" width="70" height="70" preserveAspectRatio="xMidYMid meet" />
+    </svg>
+  );
+}
+
 function TrophyName({ name }: { name: string }) {
   const numberedName = name.match(/^(.*?)\s+(#\d+)$/);
   if (!numberedName) return <span className="trophy-name">{name}</span>;
@@ -202,7 +213,7 @@ function prizeParts(prizes: unknown[], trophy: TrophyDefinition) {
 const GIFT_IMAGE_ASSETS = [
   '/assets/present.svg?v=2',
   '/assets/present.png?v=2',
-  ...TROPHIES.flatMap((trophy) => [trophy.base, ...trophy.parts.map((part) => part.src), trophy.preview, trophy.puzzleImage]
+  ...TROPHIES.flatMap((trophy) => [trophy.base, ...trophy.parts.map((part) => part.src), trophy.preview, trophy.puzzleImage, trophy.icon]
     .filter((src): src is string => Boolean(src))),
 ];
 const GIFT_ANIMATION = '/assets/emoji_gifts.tgs?v=1';
@@ -259,7 +270,9 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
                 {group.trophies.map(({ trophy, collected }) => (
                   <article className={`trophy-item trophy-item-${trophy.id}`} key={trophy.id}>
                     <div className="trophy-card">
-                      {trophy.preview && collected.size >= trophy.total ? (
+                      {trophy.icon && collected.size >= trophy.total ? (
+                        <SinglePartTrophyCard icon={trophy.icon} title={trophy.name} />
+                      ) : trophy.preview && collected.size >= trophy.total ? (
                         trophy.puzzleImage ? (
                           <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
                         ) : (
@@ -317,7 +330,9 @@ export function GiftsCatalogScreen({ onBack, prizes }: CatalogProps) {
                   return (
                     <article className={`trophy-item trophy-item-${trophy.id}`} key={trophy.id}>
                       <div className="trophy-card">
-                        {trophy.preview ? (
+                        {trophy.icon ? (
+                          <SinglePartTrophyCard icon={trophy.icon} title={trophy.name} />
+                        ) : trophy.preview ? (
                           trophy.puzzleImage ? (
                             <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
                           ) : (
