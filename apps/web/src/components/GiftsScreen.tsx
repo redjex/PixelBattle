@@ -20,6 +20,8 @@ type TrophyDefinition = {
   parts: TrophyPart[];
 };
 
+type TrophyRarity = 'legendary' | 'rare' | 'common';
+
 const TROPHIES: TrophyDefinition[] = [
   {
     id: 'yng-explrz', aliases: ['yng explrz', 'yng_explrz'], name: 'YNG EXPLRZ', total: 2,
@@ -82,6 +84,22 @@ const TROPHIES: TrophyDefinition[] = [
     name: 'ChillFlame #303522', total: 4, base: '',
     preview: '/assets/trophies/png/9.png', puzzleImage: '/assets/trophies/png/9.png', parts: [],
   },
+];
+
+const TROPHY_CATALOG_GROUPS: { rarity: TrophyRarity; label: string; trophyIds: string[] }[] = [
+  {
+    rarity: 'legendary',
+    label: 'Легендарные',
+    trophyIds: [
+      'liberty-figure-252202',
+      'candy-cane-162605',
+      'vice-cream-227533',
+      'vice-cream-428029',
+      'chill-flame-303522',
+    ],
+  },
+  { rarity: 'rare', label: 'Редкие', trophyIds: ['bear'] },
+  { rarity: 'common', label: 'Обычные', trophyIds: ['yng-explrz', 'besigned', 'stickers'] },
 ];
 
 const FOUR_PART_PATHS = [
@@ -197,6 +215,14 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
   const ownedTrophies = TROPHIES
     .map((trophy) => ({ trophy, collected: prizeParts(prizes, trophy) }))
     .filter(({ collected }) => collected.size > 0);
+  const ownedGroups = TROPHY_CATALOG_GROUPS
+    .map((group) => ({
+      ...group,
+      trophies: group.trophyIds
+        .map((trophyId) => ownedTrophies.find(({ trophy }) => trophy.id === trophyId))
+        .filter((entry): entry is (typeof ownedTrophies)[number] => Boolean(entry)),
+    }))
+    .filter(({ trophies }) => trophies.length > 0);
   return (
     <div className="gifts-screen">
       <img className="gifts-logo" src="/assets/present.png?v=2" alt="Трофеи" />
@@ -209,35 +235,49 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes }: Props) {
       )}
       {ownedTrophies.length > 0 && (
         <section className="gifts-inventory" aria-label="Полученные трофеи">
-          {ownedTrophies.map(({ trophy, collected }) => (
-            <article className="trophy-item" key={trophy.id}>
-              <div className="trophy-card">
-                {trophy.preview && collected.size >= trophy.total ? (
-                  trophy.puzzleImage ? (
-                    <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
-                  ) : (
-                    <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
-                  )
-                ) : trophy.puzzleImage ? (
-                  <FourPartTrophyCard image={trophy.puzzleImage} collected={collected} title={trophy.name} />
-                ) : (
-                  <>
-                    <img className="trophy-card-base" src={trophy.base} alt="" />
-                    {trophy.parts.map((part) => collected.has(part.number) && (
-                      <img className={`trophy-card-part ${part.className}`} src={part.src} alt="" key={part.src} />
-                    ))}
-                  </>
-                )}
+          {ownedGroups.map((group) => (
+            <section className={`trophy-rarity-section trophy-rarity-${group.rarity}`} key={group.rarity}>
+              <header className="trophy-rarity-heading">
+                <span className="trophy-rarity-mark" aria-hidden="true" />
+                <h2>{group.label}</h2>
+                <span className="trophy-rarity-line" aria-hidden="true" />
+              </header>
+              <div className="trophy-rarity-grid">
+                {group.trophies.map(({ trophy, collected }) => (
+                  <article className={`trophy-item trophy-item-${trophy.id}`} key={trophy.id}>
+                    <div className="trophy-card">
+                      {trophy.preview && collected.size >= trophy.total ? (
+                        trophy.puzzleImage ? (
+                          <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
+                        ) : (
+                          <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                        )
+                      ) : trophy.puzzleImage ? (
+                        <FourPartTrophyCard image={trophy.puzzleImage} collected={collected} title={trophy.name} />
+                      ) : (
+                        <>
+                          <img className="trophy-card-base" src={trophy.base} alt="" />
+                          {trophy.parts.map((part) => collected.has(part.number) && (
+                            <img className={`trophy-card-part ${part.className}`} src={part.src} alt="" key={part.src} />
+                          ))}
+                        </>
+                      )}
+                    </div>
+                    <div className="trophy-caption">
+                      <TrophyName name={trophy.name} />
+                      <span className="trophy-progress">{collected.size}/{trophy.total} частей</span>
+                    </div>
+                  </article>
+                ))}
               </div>
-              <div className="trophy-caption">
-                <TrophyName name={trophy.name} />
-                <span className="trophy-progress">{collected.size}/{trophy.total} частей</span>
-              </div>
-            </article>
+            </section>
           ))}
+          <button className="gifts-catalog-link gifts-catalog-link-flow" onClick={onOpenCatalog}>Полный список доступных наград</button>
         </section>
       )}
-      <button className="gifts-catalog-link" onClick={onOpenCatalog}>Полный список доступных наград</button>
+      {ownedTrophies.length === 0 && (
+        <button className="gifts-catalog-link" onClick={onOpenCatalog}>Полный список доступных наград</button>
+      )}
       <button className="stats-back" onClick={onBack}>Назад</button>
     </div>
   );
@@ -248,32 +288,46 @@ export function GiftsCatalogScreen({ onBack, prizes }: CatalogProps) {
     <div className="gifts-catalog-screen">
       <img className="gifts-logo" src="/assets/present.png?v=2" alt="Доступные награды" />
       <section className="trophy-catalog" aria-label="Полный список доступных наград">
-        {TROPHIES.map((trophy) => {
-          const collected = prizeParts(prizes, trophy);
-          return (
-            <article className="trophy-item" key={trophy.id}>
-              <div className="trophy-card">
-                {trophy.preview ? (
-                  trophy.puzzleImage ? (
-                    <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
-                  ) : (
-                    <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
-                  )
-                ) : (
-                  <>
-                    <img className="trophy-card-base" src={trophy.base} alt="" />
-                    {trophy.parts.map((part) => collected.has(part.number) && (
-                      <img className={`trophy-card-part ${part.className}`} src={part.src} alt="" key={part.src} />
-                    ))}
-                  </>
-                )}
-              </div>
-              <div className="trophy-caption">
-                <TrophyName name={trophy.name} />
-              </div>
-            </article>
-          );
-        })}
+        {TROPHY_CATALOG_GROUPS.map((group) => (
+          <section className={`trophy-rarity-section trophy-rarity-${group.rarity}`} key={group.rarity}>
+            <header className="trophy-rarity-heading">
+              <span className="trophy-rarity-mark" aria-hidden="true" />
+              <h2>{group.label}</h2>
+              <span className="trophy-rarity-line" aria-hidden="true" />
+            </header>
+            <div className="trophy-rarity-grid">
+              {group.trophyIds
+                .map((trophyId) => TROPHIES.find((item) => item.id === trophyId))
+                .filter((trophy): trophy is TrophyDefinition => Boolean(trophy))
+                .map((trophy) => {
+                  const collected = prizeParts(prizes, trophy);
+                  return (
+                    <article className={`trophy-item trophy-item-${trophy.id}`} key={trophy.id}>
+                      <div className="trophy-card">
+                        {trophy.preview ? (
+                          trophy.puzzleImage ? (
+                            <FramedTrophyPreview image={trophy.preview} title={trophy.name} />
+                          ) : (
+                            <img className="trophy-card-preview" src={trophy.preview} alt={trophy.name} />
+                          )
+                        ) : (
+                          <>
+                            <img className="trophy-card-base" src={trophy.base} alt="" />
+                            {trophy.parts.map((part) => collected.has(part.number) && (
+                              <img className={`trophy-card-part ${part.className}`} src={part.src} alt="" key={part.src} />
+                            ))}
+                          </>
+                        )}
+                      </div>
+                      <div className="trophy-caption">
+                        <TrophyName name={trophy.name} />
+                      </div>
+                    </article>
+                  );
+                })}
+            </div>
+          </section>
+        ))}
       </section>
       <button className="stats-back" onClick={onBack}>Назад</button>
     </div>

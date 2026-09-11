@@ -49,20 +49,35 @@ func TestTrophyRarityAndSupplyGrid(t *testing.T) {
 }
 
 func TestNFTOutcomePlanContainsEveryRequiredPart(t *testing.T) {
-	outcomes := shuffledNFTOutcomes()
-	if len(outcomes) != 20 {
-		t.Fatalf("expected 20 NFT parts, got %d", len(outcomes))
+	outcomes := shuffledNFTOutcomes(nftPartsPerCampaign)
+	if len(outcomes) != 100 {
+		t.Fatalf("expected 100 NFT opportunities, got %d", len(outcomes))
 	}
 	counts := make(map[string]int)
 	for _, trophyID := range outcomes {
 		counts[trophyID]++
 	}
-	if counts[outcomes[len(outcomes)-1]] != 4 {
-		t.Fatal("final planned outcome must complete its NFT")
-	}
 	for _, definition := range trophyDefinitions {
-		if definition.Cap == 1 && counts[definition.ID] != definition.Total {
-			t.Fatalf("NFT %s has %d planned parts, want %d", definition.ID, counts[definition.ID], definition.Total)
+		if definition.Cap == 1 && counts[definition.ID] != nftPartsPerCampaign {
+			t.Fatalf("NFT %s has %d planned opportunities, want %d", definition.ID, counts[definition.ID], nftPartsPerCampaign)
 		}
+	}
+}
+
+func TestNFTInventoryDropChanceFallsAsInventoryGrows(t *testing.T) {
+	previous := 2.0
+	for parts := 0; parts <= 8; parts++ {
+		counts := map[string]int{"liberty-figure-252202": parts}
+		chance := nftInventoryDropChance(counts)
+		if chance > previous {
+			t.Fatalf("chance grew from %.2f to %.2f at %d parts", previous, chance, parts)
+		}
+		previous = chance
+	}
+	if chance := nftInventoryDropChance(map[string]int{}); chance != 1 {
+		t.Fatalf("empty NFT inventory chance = %.2f, want 1", chance)
+	}
+	if chance := nftInventoryDropChance(map[string]int{"liberty-figure-252202": 6}); chance != 0.05 {
+		t.Fatalf("large NFT inventory chance = %.2f, want 0.05", chance)
 	}
 }

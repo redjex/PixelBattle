@@ -116,12 +116,12 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   useLayoutEffect(() => {
     const previousZoom = previousZoomRef.current;
     previousZoomRef.current = zoom;
-    renderedZoomRef.current = zoom;
-    if (wheelAnimationRef.current === null) targetZoomRef.current = zoom;
     if (previousZoom === zoom || skipZoomReanchorRef.current) {
       skipZoomReanchorRef.current = false;
       return;
     }
+    renderedZoomRef.current = zoom;
+    if (wheelAnimationRef.current === null) targetZoomRef.current = zoom;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -250,7 +250,10 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       // Do not flash the obsolete placeholder board while the live snapshot loads.
       if (!boardReadyRef.current) return;
 
-      const cell = zoom;
+      // Pan and zoom are updated together in the gesture frame. Rendering from
+      // the React prop here could combine a fresh pan with a one-frame-old zoom
+      // and make the board jump, especially when pinching near an edge.
+      const cell = renderedZoomRef.current;
       const { width, height } = boardSizeRef.current;
       const originX = rect.width / 2 - (width * cell) / 2 + panRef.current.x;
       const originY = rect.height / 2 - (height * cell) / 2 + panRef.current.y;
@@ -382,10 +385,11 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   function getCell(event: React.PointerEvent<HTMLCanvasElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     const { width, height } = boardSizeRef.current;
-    const originX = rect.width / 2 - (width * zoom) / 2 + panRef.current.x;
-    const originY = rect.height / 2 - (height * zoom) / 2 + panRef.current.y;
-    const x = Math.floor((event.clientX - rect.left - originX) / zoom);
-    const y = Math.floor((event.clientY - rect.top - originY) / zoom);
+    const cell = renderedZoomRef.current;
+    const originX = rect.width / 2 - (width * cell) / 2 + panRef.current.x;
+    const originY = rect.height / 2 - (height * cell) / 2 + panRef.current.y;
+    const x = Math.floor((event.clientX - rect.left - originX) / cell);
+    const y = Math.floor((event.clientY - rect.top - originY) / cell);
     return { x, y };
   }
 

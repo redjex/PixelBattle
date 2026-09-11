@@ -46,8 +46,8 @@ export function AgreementScreen({ onBack }: Props) {
             <div><a href="https://t.me/IdeaAnimator" target="_blank" rel="noreferrer">IdeaAnimator</a><p>Дизайнер и Идеолог проекта</p></div>
           </article>
           <article className="developer-card">
-            <video src="/assets/soun.mp4" autoPlay loop muted playsInline aria-label="Арт от Oktokto" />
-            <div><a href="https://t.me/ocktokto" target="_blank" rel="noreferrer">Oktokto</a><p>Художник арта «PixelBattle»</p></div>
+            <video src="/assets/soun.mp4" autoPlay loop muted playsInline aria-label="Арт от Soun" />
+            <div><a href="https://t.me/ocktokto" target="_blank" rel="noreferrer">Soun</a><p>Художник арта «PixelBattle»</p></div>
           </article>
         </div>
       </section>

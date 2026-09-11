@@ -94,7 +94,7 @@ export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating }: Prop
           <div className="stats-status"><p>Не удалось загрузить статистику.</p><button onClick={() => setReloadNonce((value) => value + 1)}>Повторить</button></div>
         ) : (
           <>
-            <img className="stats-logo" src="/assets/stats.png" alt="Статистика" />
+            <img className="stats-logo" src="/assets/profile.png" alt="Профиль" />
             <section className="stats-profile">
               {avatar ? <img className="stats-avatar" src={avatar} alt="" /> : <div className="stats-avatar stats-avatar-fallback">{username.slice(0, 1).toUpperCase()}</div>}
               <strong className="stats-username">{username}</strong>
