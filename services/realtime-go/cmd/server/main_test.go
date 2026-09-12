@@ -3,6 +3,8 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"pixelbattle/realtime/internal/domain"
 )
 
 func TestBombPaletteUsesOnlyPaletteColumn(t *testing.T) {
@@ -44,5 +46,20 @@ func TestLevelRewardsAlternateAndScale(t *testing.T) {
 		if item != test.item || amount != test.amount {
 			t.Errorf("levelReward(%d) = (%q,%d), want (%q,%d)", test.level, item, amount, test.item, test.amount)
 		}
+	}
+}
+
+func TestRenderMapCanvasUsesFastHexColorPath(t *testing.T) {
+	canvas := renderMapCanvas(2, 2, []domain.BoardPixel{
+		{X: 1, Y: 1, Color: "#12aBef"},
+		{X: 0, Y: 1, Color: "invalid"},
+	})
+	painted := canvas.RGBAAt(900, 900)
+	if painted.R != 0x12 || painted.G != 0xab || painted.B != 0xef || painted.A != 0xff {
+		t.Fatalf("painted pixel = %#v", painted)
+	}
+	background := canvas.RGBAAt(100, 900)
+	if background.R != 0xff || background.G != 0xff || background.B != 0xff || background.A != 0xff {
+		t.Fatalf("invalid color changed background: %#v", background)
 	}
 }

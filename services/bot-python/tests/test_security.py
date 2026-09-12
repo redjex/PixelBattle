@@ -149,11 +149,12 @@ def test_inline_query_offers_shareable_map_button():
     method, payload = call.call_args.args
     assert method == "answerInlineQuery"
     assert payload["inline_query_id"] == "inline-1"
+    assert payload["cache_time"] == 3
     result = payload["results"][0]
     assert result["type"] == "photo"
     assert result["title"] == "PIXEL BATTLE"
-    assert result["id"] == "pixel-battle-map-20"
-    assert result["photo_url"] == f"{bot.APP_URL}/inline-map.jpg?v=20"
+    assert result["id"] == "pixel-battle-map-10"
+    assert result["photo_url"] == f"{bot.APP_URL}/inline-map.jpg?v=10"
     assert result["photo_width"] == 1200
     assert result["photo_height"] == 1200
     assert result["caption"] == "Присоединяйся к битве!"

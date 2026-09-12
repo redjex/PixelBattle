@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
 	"image/jpeg"
 	"image/png"
 	"log"
@@ -67,11 +66,7 @@ func main() {
 	boardWidth.Store(defaultBoardSize)
 	boardHeight.Store(defaultBoardSize)
 	boardCache := &boardSnapshotCache{}
-	inlineImageCache := struct {
-		sync.Mutex
-		data      []byte
-		expiresAt time.Time
-	}{}
+	inlineImageCache := &inlineMapImageCache{}
 	adminAPIToken := env("ADMIN_API_TOKEN", "")
 	requestLimits := &rateLimiter{}
 	socketLimits := &connectionLimits{}
@@ -832,25 +827,37 @@ func main() {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(output.Bytes())
 	})
-	http.HandleFunc("/inline-map.jpg", func(w http.ResponseWriter, _ *http.Request) {
+	http.HandleFunc("/inline-map.jpg", func(w http.ResponseWriter, r *http.Request) {
 		inlineImageCache.Lock()
-		defer inlineImageCache.Unlock()
-		if time.Now().After(inlineImageCache.expiresAt) || len(inlineImageCache.data) == 0 {
+		now := time.Now()
+		revision := boardStore.Revision("main")
+		if len(inlineImageCache.data) == 0 || (revision != inlineImageCache.revision && now.Sub(inlineImageCache.generatedAt) >= 5*time.Second) {
 			boardMu.Lock()
 			canvas := renderMapCanvas(int(boardWidth.Load()), int(boardHeight.Load()), boardStore.Snapshot("main"))
+			revision = boardStore.Revision("main")
 			boardMu.Unlock()
 			var output bytes.Buffer
-			if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: 96}); err != nil {
+			if err := jpeg.Encode(&output, canvas, &jpeg.Options{Quality: 88}); err != nil {
+				inlineImageCache.Unlock()
 				http.Error(w, "failed to render map", http.StatusInternalServerError)
 				return
 			}
 			inlineImageCache.data = output.Bytes()
-			inlineImageCache.expiresAt = time.Now().Add(2 * time.Second)
+			inlineImageCache.revision = revision
+			inlineImageCache.generatedAt = now
 		}
-		w.Header().Set("Cache-Control", "public, max-age=2")
+		data := inlineImageCache.data
+		etag := fmt.Sprintf(`W/"%d"`, inlineImageCache.revision)
+		inlineImageCache.Unlock()
+		w.Header().Set("Cache-Control", "public, max-age=5, stale-while-revalidate=30")
+		w.Header().Set("ETag", etag)
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Content-Length", strconv.Itoa(len(inlineImageCache.data)))
-		_, _ = w.Write(inlineImageCache.data)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		_, _ = w.Write(data)
 	})
 	http.HandleFunc("/api/admin/boards/main/size", func(w http.ResponseWriter, r *http.Request) {
 		boardMu.Lock()
@@ -1740,10 +1747,8 @@ func profileFromTelegram(user auth.TelegramUser) domain.PixelAuthor {
 func renderMapCanvas(width, height int, pixels []domain.BoardPixel) *image.RGBA {
 	const outputSize = 1200
 	canvas := image.NewRGBA(image.Rect(0, 0, outputSize, outputSize))
-	for y := 0; y < outputSize; y++ {
-		for x := 0; x < outputSize; x++ {
-			canvas.Set(x, y, color.White)
-		}
+	for index := range canvas.Pix {
+		canvas.Pix[index] = 0xff
 	}
 	cellW := outputSize / width
 	cellH := outputSize / height
@@ -1757,17 +1762,52 @@ func renderMapCanvas(width, height int, pixels []domain.BoardPixel) *image.RGBA 
 		if pixel.X < 0 || pixel.Y < 0 || pixel.X >= width || pixel.Y >= height {
 			continue
 		}
-		parsed := color.RGBA{A: 255}
-		if _, err := fmt.Sscanf(pixel.Color, "#%02x%02x%02x", &parsed.R, &parsed.G, &parsed.B); err != nil {
+		red, green, blue, ok := parseMapColor(pixel.Color)
+		if !ok {
 			continue
 		}
-		for y := pixel.Y * cellH; y < (pixel.Y+1)*cellH && y < outputSize; y++ {
-			for x := pixel.X * cellW; x < (pixel.X+1)*cellW && x < outputSize; x++ {
-				canvas.Set(x, y, parsed)
+		xStart := pixel.X * cellW
+		xEnd := min((pixel.X+1)*cellW, outputSize)
+		for y := pixel.Y * cellH; y < min((pixel.Y+1)*cellH, outputSize); y++ {
+			offset := y*canvas.Stride + xStart*4
+			for x := xStart; x < xEnd; x++ {
+				canvas.Pix[offset] = red
+				canvas.Pix[offset+1] = green
+				canvas.Pix[offset+2] = blue
+				canvas.Pix[offset+3] = 0xff
+				offset += 4
 			}
 		}
 	}
 	return canvas
+}
+
+func parseMapColor(value string) (byte, byte, byte, bool) {
+	if len(value) != 7 || value[0] != '#' {
+		return 0, 0, 0, false
+	}
+	parts := [6]byte{}
+	for index := range parts {
+		nibble, ok := mapColorNibble(value[index+1])
+		if !ok {
+			return 0, 0, 0, false
+		}
+		parts[index] = nibble
+	}
+	return parts[0]<<4 | parts[1], parts[2]<<4 | parts[3], parts[4]<<4 | parts[5], true
+}
+
+func mapColorNibble(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	default:
+		return 0, false
+	}
 }
 
 func telegramUserFromRequest(r *http.Request) (auth.TelegramUser, error) {
@@ -1803,6 +1843,13 @@ type boardSnapshotCache struct {
 	height     int64
 	raw        []byte
 	compressed []byte
+}
+
+type inlineMapImageCache struct {
+	sync.Mutex
+	data        []byte
+	revision    uint64
+	generatedAt time.Time
 }
 
 func (c *boardSnapshotCache) Payload(store *state.BoardStore, width, height int64) ([]byte, []byte, error) {

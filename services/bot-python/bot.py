@@ -835,7 +835,7 @@ def map_markup() -> dict:
 
 
 def inline_map_result() -> dict[str, Any]:
-    image_version = int(time.time() // 5)
+    image_version = int(time.time() // 10)
     image_url = f"{APP_URL}/inline-map.jpg?v={image_version}"
     return {
         "type": "photo",
@@ -864,7 +864,7 @@ def handle_inline_query(inline_query: dict[str, Any]) -> None:
         {
             "inline_query_id": inline_query_id,
             "results": [inline_map_result()],
-            "cache_time": 0,
+            "cache_time": 3,
             "is_personal": False,
         },
     )
