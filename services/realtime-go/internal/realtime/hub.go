@@ -114,6 +114,24 @@ func (h *Hub) Broadcast(payload []byte) {
 	}
 }
 
+func (h *Hub) SendToUser(userID string, payload []byte) {
+	h.mu.RLock()
+	clients := make([]*Client, 0, 3)
+	for client := range h.clients {
+		if client.UserID == userID {
+			clients = append(clients, client)
+		}
+	}
+	h.mu.RUnlock()
+	for _, client := range clients {
+		select {
+		case client.send <- payload:
+		default:
+			h.Remove(client)
+		}
+	}
+}
+
 func (c *Client) writePump(remove func()) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() { ticker.Stop(); remove() }()

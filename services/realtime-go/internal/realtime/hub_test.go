@@ -66,3 +66,25 @@ func TestHubPerUserLimitAndRelease(t *testing.T) {
 	}
 	defer h.Remove(c)
 }
+
+func TestHubSendToUser(t *testing.T) {
+	h := NewHub()
+	target := &Client{UserID: "123", send: make(chan []byte, 1), done: make(chan struct{})}
+	other := &Client{UserID: "456", send: make(chan []byte, 1), done: make(chan struct{})}
+	h.clients[target] = struct{}{}
+	h.clients[other] = struct{}{}
+	h.SendToUser("123", []byte("captcha"))
+	select {
+	case payload := <-target.send:
+		if string(payload) != "captcha" {
+			t.Fatalf("unexpected payload %q", payload)
+		}
+	default:
+		t.Fatal("target user did not receive payload")
+	}
+	select {
+	case <-other.send:
+		t.Fatal("another user received targeted payload")
+	default:
+	}
+}

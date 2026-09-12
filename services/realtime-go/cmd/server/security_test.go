@@ -129,10 +129,20 @@ func TestSecurityMiddleware(t *testing.T) {
 		{"trophy force ready", "POST", "/api/admin/trophies/drop", `{}`, "Bearer secret", false, 204},
 		{"trophy method rejected", "PUT", "/api/admin/trophies/drop", `{}`, "Bearer secret", false, 405},
 		{"trophy reset", "POST", "/api/admin/trophies/reset", `{"userId":"123"}`, "Bearer secret", false, 204},
+		{"force captcha", "POST", "/api/admin/captcha/require", `{"userId":"123"}`, "Bearer secret", false, 204},
+		{"captcha statuses", "GET", "/api/admin/captcha/statuses", "", "Bearer secret", false, 204},
+		{"reward requests", "GET", "/api/admin/trophy-reward-requests", "", "Bearer secret", false, 204},
+		{"reward request ack", "POST", "/api/admin/trophy-reward-requests/ack", `{"requestId":1}`, "Bearer secret", false, 204},
+		{"recording status", "GET", "/api/admin/recording", "", "Bearer secret", false, 204},
+		{"recording start", "POST", "/api/admin/recording/start", `{}`, "Bearer secret", false, 204},
+		{"recording stop", "POST", "/api/admin/recording/stop", `{}`, "Bearer secret", false, 204},
+		{"reset all", "POST", "/api/admin/reset-all", `{}`, "Bearer secret", false, 204},
 		{"public inline map", "GET", "/inline-map.jpg", "", "", false, 204},
 		{"resize requires put", "POST", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 405},
 		{"resize put", "PUT", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 204},
 		{"get only", "POST", "/api/profiles/123", "", "", false, 405},
+		{"trophy reward requires get", "POST", "/api/boards/trophies/yng-explrz/reward", `{}`, "", false, 405},
+		{"trophy reward requires auth", "GET", "/api/boards/trophies/yng-explrz/reward", "", "", false, 401},
 		{"no implicit head", "HEAD", "/health", "", "", false, 405},
 		{"unknown route", "POST", "/unknown", "", "", false, 404},
 		{"auth before body", "POST", "/api/boards/main/pixels", `{}`, "", false, 401},
@@ -303,6 +313,25 @@ func TestPublicBoardDoesNotLeakProfileOrEventMetadata(t *testing.T) {
 		}
 		if !strings.Contains(string(data), "123") {
 			t.Fatal("public profile lookup ID missing")
+		}
+	}
+}
+
+func TestTrophyAwardEventOnlyExposesNicknameAndText(t *testing.T) {
+	data, err := json.Marshal(trophyAwardEvent{Nickname: "player", Text: "Игроку player выпал трофей!"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 2 || payload["nickname"] != "player" || payload["text"] != "Игроку player выпал трофей!" {
+		t.Fatalf("unexpected public trophy payload: %s", data)
+	}
+	for _, forbidden := range []string{"eventId", "userId", "trophyId", "trophyName", "completed"} {
+		if _, exists := payload[forbidden]; exists {
+			t.Fatalf("private trophy field %q leaked: %s", forbidden, data)
 		}
 	}
 }

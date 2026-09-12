@@ -8,7 +8,7 @@ type Props = {
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 100;
-const BUTTON_ZOOM_FACTOR = 1.08;
+const BUTTON_ZOOM_FACTOR = Math.pow(1.08, 1.2);
 
 export function GlassControls({ zoom, onZoom, onImageTemplate, hasImageTemplate, onCancelImageTemplate }: Props) {
   return (

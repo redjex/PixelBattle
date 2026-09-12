@@ -8,8 +8,6 @@ type Props = {
   prizes: unknown[];
   pendingItemRewards: TrophyItemReward[];
   onItemRewardClaimed: (rewardId: number) => void;
-  focusRewardId?: string | null;
-  onRewardOpened?: () => void;
 };
 type CatalogProps = { onBack: () => void; prizes: unknown[]; soldOutTrophies: string[] };
 
@@ -438,7 +436,7 @@ function ItemRewardDialog({ reward, onClose, onClaimed }: { reward: TrophyItemRe
   );
 }
 
-export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards, onItemRewardClaimed, focusRewardId, onRewardOpened }: Props) {
+export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards, onItemRewardClaimed }: Props) {
   const [selectedTrophy, setSelectedTrophy] = useState<TrophyDefinition | null>(null);
   const [selectedItemReward, setSelectedItemReward] = useState<TrophyItemReward | null>(null);
   const ownedTrophies = useMemo(() => TROPHIES
@@ -452,15 +450,6 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
         .filter((entry): entry is (typeof ownedTrophies)[number] => Boolean(entry)),
     }))
     .filter(({ trophies }) => trophies.length > 0), [ownedTrophies]);
-
-  useEffect(() => {
-    if (!focusRewardId) return;
-    const completed = ownedTrophies.find(({ trophy, collected }) => trophy.id === focusRewardId
-      && trophy.total > 1 && collected.size >= trophy.total);
-    if (!completed) return;
-    setSelectedTrophy(completed.trophy);
-    onRewardOpened?.();
-  }, [focusRewardId, onRewardOpened, ownedTrophies]);
 
   return (
     <div className="gifts-screen">
@@ -485,10 +474,11 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
                 {pendingItemRewards.map((reward) => {
                   const icon = reward.item === 'bomb' ? '/assets/bomb.svg' : reward.item === 'ice' ? '/assets/ice.svg' : '/assets/exp.svg?v=2';
                   return (
-                    <button className={`trophy-item trophy-reward-open trophy-item-${reward.item}`} type="button" onClick={() => setSelectedItemReward(reward)} key={reward.rewardId} aria-label={`Получить «${itemRewardName(reward)}»`}>
+                    <article className={`trophy-item trophy-item-${reward.item}`} key={reward.rewardId}>
                       <div className="trophy-card"><SinglePartTrophyCard icon={icon} title={itemRewardName(reward)} /></div>
                       <div className="trophy-caption"><TrophyName name={itemRewardName(reward)} /></div>
-                    </button>
+                      <button className="trophy-card-action" type="button" onClick={() => setSelectedItemReward(reward)} aria-label={`Получить «${itemRewardName(reward)}»`} />
+                    </article>
                   );
                 })}
               </div>
@@ -532,12 +522,11 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
                       {trophy.total > 1 && <span className="trophy-progress">{collected.size}/{trophy.total} частей</span>}
                     </div>
                   </>;
-                  return completed ? (
-                    <button className={`trophy-item trophy-reward-open trophy-item-${trophy.id}`} type="button" onClick={() => setSelectedTrophy(trophy)} key={trophy.id} aria-label={`Открыть награду «${trophy.name}»`}>
+                  return (
+                    <article className={`trophy-item trophy-item-${trophy.id}`} key={trophy.id}>
                       {content}
-                    </button>
-                  ) : (
-                    <article className={`trophy-item trophy-item-${trophy.id}`} key={trophy.id}>{content}</article>
+                      {completed && <button className="trophy-card-action" type="button" onClick={() => setSelectedTrophy(trophy)} aria-label={`Открыть награду «${trophy.name}»`} />}
+                    </article>
                   );
                 })}
               </div>
@@ -556,7 +545,7 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
             <div className="trophy-rarity-grid">
               {pendingItemRewards.map((reward) => {
                 const icon = reward.item === 'bomb' ? '/assets/bomb.svg' : reward.item === 'ice' ? '/assets/ice.svg' : '/assets/exp.svg?v=2';
-                return <button className={`trophy-item trophy-reward-open trophy-item-${reward.item}`} type="button" onClick={() => setSelectedItemReward(reward)} key={reward.rewardId}><div className="trophy-card"><SinglePartTrophyCard icon={icon} title={itemRewardName(reward)} /></div><div className="trophy-caption"><TrophyName name={itemRewardName(reward)} /></div></button>;
+                return <article className={`trophy-item trophy-item-${reward.item}`} key={reward.rewardId}><div className="trophy-card"><SinglePartTrophyCard icon={icon} title={itemRewardName(reward)} /></div><div className="trophy-caption"><TrophyName name={itemRewardName(reward)} /></div><button className="trophy-card-action" type="button" onClick={() => setSelectedItemReward(reward)} aria-label={`Получить «${itemRewardName(reward)}»`} /></article>;
               })}
             </div>
           </section>

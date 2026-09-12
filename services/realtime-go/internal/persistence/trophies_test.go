@@ -27,12 +27,12 @@ func TestTrophyDropChanceUsesOnlineAndLocalTime(t *testing.T) {
 }
 
 func TestTrophyRarityAndSupplyGrid(t *testing.T) {
-	if len(trophyDefinitions) != 13 {
-		t.Fatalf("expected 13 trophy definitions, got %d", len(trophyDefinitions))
+	if len(trophyDefinitions) != 15 {
+		t.Fatalf("expected 15 trophy definitions, got %d", len(trophyDefinitions))
 	}
 	for _, definition := range trophyDefinitions {
 		switch definition.ID {
-		case "stickers", "yng-explrz", "besigned":
+		case "stickers", "yng-explrz", "besigned", "stikidbot", "stashvpn":
 			if definition.Weight != 100 || definition.Cap != 50 {
 				t.Fatalf("invalid promo settings for %s: weight=%d cap=%d", definition.ID, definition.Weight, definition.Cap)
 			}
@@ -45,16 +45,16 @@ func TestTrophyRarityAndSupplyGrid(t *testing.T) {
 				t.Fatalf("invalid redjex bear settings: weight=%d cap=%d parts=%d", definition.Weight, definition.Cap, definition.Total)
 			}
 		case "experience", "bomb", "ice":
-			if definition.Weight != 100 || definition.Total != 1 || definition.RewardAmount <= 0 {
+			if definition.Weight != 500 || definition.Total != 1 || definition.RewardAmount <= 0 {
 				t.Fatalf("invalid common reward settings for %s: weight=%d cap=%d parts=%d amount=%d", definition.ID, definition.Weight, definition.Cap, definition.Total, definition.RewardAmount)
 			}
-			if definition.ID == "experience" && (definition.Cap != 50 || definition.Repeatable || definition.RewardAmount != 100) {
+			if definition.ID == "experience" && (definition.Cap != 500 || definition.Repeatable || definition.RewardAmount != 100) {
 				t.Fatalf("invalid experience settings: %+v", definition)
 			}
 			if definition.ID == "bomb" && (definition.Cap != 500 || !definition.Repeatable || definition.RewardAmount != 5) {
 				t.Fatalf("invalid bomb settings: %+v", definition)
 			}
-			if definition.ID == "ice" && (definition.Cap != 500 || !definition.Repeatable || definition.RewardAmount != 1) {
+			if definition.ID == "ice" && (definition.Cap != 500 || !definition.Repeatable || definition.RewardAmount != 5) {
 				t.Fatalf("invalid ice settings: %+v", definition)
 			}
 		default:
@@ -73,6 +73,8 @@ func TestTrophyRarityGridMatchesDefinitions(t *testing.T) {
 		"stickers":              "uncommon",
 		"yng-explrz":            "uncommon",
 		"besigned":              "uncommon",
+		"stikidbot":             "uncommon",
+		"stashvpn":              "uncommon",
 		"bear":                  "rare",
 		"bear-redjex":           "rare",
 		"liberty-figure-252202": "legendary",
@@ -164,10 +166,10 @@ func TestNFTInventoryDropChanceFallsAsInventoryGrows(t *testing.T) {
 		}
 		previous = chance
 	}
-	if chance := nftInventoryDropChance(map[string]int{}); chance != 1 {
-		t.Fatalf("empty NFT inventory chance = %.2f, want 1", chance)
+	if chance := nftInventoryDropChance(map[string]int{}); chance != 1*trophyChanceMultiplier {
+		t.Fatalf("empty NFT inventory chance = %.2f, want %.2f", chance, 1*trophyChanceMultiplier)
 	}
-	if chance := nftInventoryDropChance(map[string]int{"liberty-figure-252202": 6}); chance != 0.05 {
-		t.Fatalf("large NFT inventory chance = %.2f, want 0.05", chance)
+	if chance := nftInventoryDropChance(map[string]int{"liberty-figure-252202": 6}); chance != 0.05*trophyChanceMultiplier {
+		t.Fatalf("large NFT inventory chance = %.3f, want %.3f", chance, 0.05*trophyChanceMultiplier)
 	}
 }

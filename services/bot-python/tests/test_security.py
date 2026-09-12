@@ -40,6 +40,83 @@ def test_test_mode_uses_protected_admin_endpoint():
     response.raise_for_status.assert_called_once()
 
 
+def test_force_captcha_uses_protected_admin_endpoint():
+    response = Mock()
+    with patch.object(bot, "realtime_request", return_value=response) as request:
+        bot.require_player_captcha(789)
+    request.assert_called_once_with(
+        "POST", "/api/admin/captcha/require", json={"userId": "789"}
+    )
+    response.raise_for_status.assert_called_once()
+
+
+def test_captcha_status_changes_are_sent_once_to_alert_group():
+    response = Mock()
+    response.json.return_value = {
+        "players": [
+            {
+                "userId": "789",
+                "status": "suspicious",
+                "updatedAt": "2026-09-11T10:00:00Z",
+            },
+            {
+                "userId": "456",
+                "status": "clean",
+                "updatedAt": "2026-09-11T10:01:00Z",
+            },
+        ]
+    }
+    usernames = {"789": "suspect", "456": "human"}
+    markers = {}
+
+    def hget(key, field):
+        if key == bot.USER_ID_KEY:
+            return usernames.get(field)
+        return markers.get(field)
+
+    def hset(key, field, value):
+        assert key == bot.CAPTCHA_NOTIFICATION_KEY
+        markers[field] = value
+
+    with patch.object(bot, "realtime_request", return_value=response) as request, patch.object(
+        bot.database, "hget", side_effect=hget
+    ), patch.object(bot.database, "hset", side_effect=hset), patch.object(
+        bot, "send_message"
+    ) as send_message:
+        bot.notify_admins_about_captcha_statuses()
+        bot.notify_admins_about_captcha_statuses()
+
+    assert request.call_count == 2
+    assert send_message.call_count == 2
+    send_message.assert_any_call(
+        bot.CAPTCHA_ALERT_CHAT_ID,
+        "⚠️ @suspect (ID 789) не прошёл капчу — пользователь под подозрением.",
+    )
+    send_message.assert_any_call(
+        bot.CAPTCHA_ALERT_CHAT_ID,
+        "✅ @human (ID 456) прошёл капчу — человек чистый.",
+    )
+
+
+def test_suspicious_notification_waits_one_minute():
+    response = Mock()
+    response.json.return_value = {
+        "players": [
+            {
+                "userId": "789",
+                "status": "suspicious",
+                "updatedAt": "1970-01-01T00:16:20Z",
+            }
+        ]
+    }
+    with patch.object(bot, "realtime_request", return_value=response), patch.object(
+        bot.time, "time", return_value=1000
+    ), patch.object(bot, "send_message") as send_message:
+        bot.notify_admins_about_captcha_statuses()
+
+    send_message.assert_not_called()
+
+
 def test_map_throttle_bounded():
     bot.map_requests.clear()
     bot.map_global_next = 0
@@ -128,7 +205,9 @@ def test_non_admin_callback_cannot_mutate():
 def test_loop_does_not_log_url(capsys):
     with patch.object(bot.database, "ping"), patch.object(
         bot, "call", side_effect=RuntimeError("https://telegram/botSECRET")
-    ), patch.object(bot.time, "sleep", side_effect=KeyboardInterrupt):
+    ), patch.object(bot.time, "sleep", side_effect=KeyboardInterrupt), patch.object(
+        bot.threading, "Thread"
+    ):
         try:
             bot.main()
         except KeyboardInterrupt:

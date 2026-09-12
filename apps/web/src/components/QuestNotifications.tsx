@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { currentDailyKey, getDailyQuests } from '../dailyQuests';
 import { getPlayerLevelProgress } from '../playerLevel';
 import { getCachedStatistics, refreshStatistics } from '../statisticsCache';
+import { isCurrentUserNickname, shouldPlayRewardSound } from '../rewardSound';
 
-type QuestNotice = { id: string; label: string; strike: boolean; celebrate: boolean };
-type TrophyAwardedDetail = { eventId: string; userId: string; nickname: string; completed: boolean };
+type QuestNotice = { id: string; label: string; strike: boolean; celebrate: boolean; ownReward: boolean };
+type TrophyAwardedDetail = { nickname: string; text: string };
 
 const CONFETTI_COLORS = ['#008EFB', '#FFD60A', '#31E52D', '#FF3B30', '#AF52DE', '#FFFFFF'];
 const CONFETTI = Array.from({ length: 42 }, (_, index) => ({
@@ -23,7 +24,7 @@ export function QuestNotifications({ active: mapActive }: { active: boolean }) {
   const initializedRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
   const refreshUntilRef = useRef(0);
-  const trophyEventsRef = useRef(new Set<string>());
+  const trophyNoticeSequenceRef = useRef(0);
   const playerLevelRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -40,9 +41,9 @@ export function QuestNotifications({ active: mapActive }: { active: boolean }) {
         if (initializedRef.current && mayNotify && activeRef.current) {
           const newNotices: QuestNotice[] = quests
             .filter((quest) => quest.done && !completedRef.current.has(quest.id))
-            .map(({ id, label }) => ({ id, label, strike: true, celebrate: false }));
+            .map(({ id, label }) => ({ id, label, strike: true, celebrate: false, ownReward: true }));
           if (playerLevelRef.current !== null && playerLevel > playerLevelRef.current) {
-            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel} уровня!`, strike: false, celebrate: false });
+            newNotices.push({ id: `level-${playerLevel}`, label: `Вы достигли ${playerLevel} уровня!`, strike: false, celebrate: false, ownReward: true });
           }
           if (newNotices.length) setNotices((current) => [...current, ...newNotices]);
         }
@@ -80,17 +81,12 @@ export function QuestNotifications({ active: mapActive }: { active: boolean }) {
     const handleTrophyAwarded = (event: Event) => {
       if (!activeRef.current) return;
       const detail = (event as CustomEvent<TrophyAwardedDetail>).detail;
-      if (!detail?.eventId || !detail.userId || trophyEventsRef.current.has(detail.eventId)) return;
-      trophyEventsRef.current.add(detail.eventId);
-      const isWinner = String(userId ?? '') === detail.userId;
-      const nickname = detail.nickname.trim();
-      const completed = isWinner && detail.completed;
-      const label = isWinner
-        ? completed ? 'Вы собрали трофей!' : 'Вам выпал трофей!'
-        : `Игроку ${nickname || 'участнику'} выпал трофей!`;
+      const label = detail?.text.trim();
+      if (!label || typeof detail.nickname !== 'string') return;
+      trophyNoticeSequenceRef.current += 1;
       setNotices((current) => [
         ...current,
-        { id: `trophy-${detail.eventId}`, label, strike: false, celebrate: completed },
+        { id: `trophy-${Date.now()}-${trophyNoticeSequenceRef.current}`, label, strike: false, celebrate: false, ownReward: isCurrentUserNickname(detail.nickname) },
       ]);
     };
     window.addEventListener('pixelbattle:placement-accepted', handlePlacement);
@@ -111,9 +107,11 @@ export function QuestNotifications({ active: mapActive }: { active: boolean }) {
   const active = notices[0];
   useEffect(() => {
     if (!active) return;
-    const audio = new Audio('/assets/notification.mp3');
-    audio.volume = 0.72;
-    void audio.play().catch(() => undefined);
+    if (shouldPlayRewardSound(active.ownReward)) {
+      const audio = new Audio('/assets/notification.mp3');
+      audio.volume = 0.72;
+      void audio.play().catch(() => undefined);
+    }
     if (active.celebrate) window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
     const timer = window.setTimeout(() => setNotices((current) => current.slice(1)), 4100);
     return () => window.clearTimeout(timer);

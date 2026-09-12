@@ -2,9 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { GlassControls } from './GlassControls';
 import { PixelBoard } from './PixelBoard';
 import type { Pixel } from '../types/pixel';
-import { dispatchTrophyAward } from '../hooks/usePixelSocket';
 import { SeasonStatus } from './SeasonStatus';
 import { loadTemplate, removeTemplate, saveTemplateImage, saveTemplatePlacement, type TemplatePlacement } from '../templateStorage';
+import { getTemplateOpacity } from '../templateOpacity';
 
 const COLORS = [
   '#FF8080', '#FFCA73', '#FBFFA5', '#7CFF80', '#7EFFF2', '#84D0FF', '#8290FF', '#CD81FF', '#FF80D0', '#FDFDFD',
@@ -279,7 +279,7 @@ export function BattleScreen({ online }: { online: number | null }) {
   };
 
   const explodeBomb = async () => {
-    if (itemBusy || paused || !selectedPixel || inventory.bombs <= 0) return;
+    if (itemBusy || paused || !selectedPixel || inventory.bombs <= 0 || cooldownSeconds > 0) return;
     const initData = window.Telegram?.WebApp?.initData;
     if (!initData) return;
     setItemBusy('bomb');
@@ -290,11 +290,16 @@ export function BattleScreen({ online }: { online: number | null }) {
         headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
         body: JSON.stringify({ ...selectedPixel, color, operationId: crypto.randomUUID() }),
       });
-      const result = await response.json() as { inventory?: Inventory; trophyAward?: unknown };
+      if (response.status === 429) {
+        const retryAfter = Math.max(1, Number(response.headers.get('Retry-After')) || Math.ceil(placementCooldownMs / 1000));
+        setCooldownUntil(Date.now() + retryAfter * 1000);
+        return;
+      }
+      const result = await response.json() as { inventory?: Inventory };
       if (result.inventory) setInventory(result.inventory);
       if (response.ok) {
-        if (result.trophyAward) dispatchTrophyAward(result.trophyAward);
         setItemMode(null);
+        if (placementCooldownMs > 0) setCooldownUntil(Date.now() + placementCooldownMs);
         window.dispatchEvent(new Event('pixelbattle:placement-accepted'));
       }
     } catch { /* Session refresh will restore the inventory. */ }
@@ -302,7 +307,7 @@ export function BattleScreen({ online }: { online: number | null }) {
   };
 
   const performAction = async () => {
-    if (itemBusy || paused || !selectedPixel || isForeignFrozen || (cooldownSeconds > 0 && itemMode !== 'bomb')) return;
+    if (itemBusy || paused || !selectedPixel || isForeignFrozen || cooldownSeconds > 0) return;
     if (itemMode === 'bomb') {
       await explodeBomb();
       return;
@@ -327,10 +332,10 @@ export function BattleScreen({ online }: { online: number | null }) {
     ? 'Игра на паузе'
     : isForeignFrozen
       ? frozenLabel
-      : itemMode === 'bomb'
-        ? 'Взорвать'
       : cooldownSeconds > 0
       ? `Через ${cooldownSeconds} с`
+      : itemMode === 'bomb'
+        ? 'Взорвать'
       : itemMode === 'ice'
         ? 'Заморозить'
       : 'Покрасить';
@@ -367,6 +372,7 @@ export function BattleScreen({ online }: { online: number | null }) {
         }}
         templateImageUrl={templateImageUrl}
         templatePlacement={templatePlacement}
+        templateOpacity={getTemplateOpacity() / 100}
         onTemplatePlacementChange={persistTemplatePlacement}
       />
       <GlassControls
@@ -403,7 +409,9 @@ export function BattleScreen({ online }: { online: number | null }) {
               {safePhotoUrl
                  ? <img className="pixel-owner-avatar" src={safePhotoUrl} alt="" />
                 : <span className="pixel-owner-avatar pixel-owner-fallback">{authorLabel.slice(0, 1).toUpperCase()}</span>}
-              <span className="pixel-owner-name">{authorLabel}</span>
+              {safeUsername
+                ? <a className="pixel-owner-name" href={`https://t.me/${safeUsername}`} target="_blank" rel="noreferrer" aria-label={`Открыть профиль ${authorLabel}`}>{authorLabel}</a>
+                : <span className="pixel-owner-name">{authorLabel}</span>}
               <span className="pixel-owner-balance" aria-hidden="true" />
             </div>}
             <button className={`pixel-item-button${itemMode === 'bomb' ? ' selected' : ''}`} onClick={() => setItemMode((current) => current === 'bomb' ? null : 'bomb')} disabled={itemBusy !== null || paused || inventory.bombs <= 0} aria-label="Выбрать бомбу" aria-pressed={itemMode === 'bomb'}>
@@ -437,9 +445,9 @@ export function BattleScreen({ online }: { online: number | null }) {
         <button
           className={`paint-action visible${isForeignFrozen ? ' frozen' : ''}`}
           onClick={() => void performAction()}
-          disabled={paused || !selectedPixel || itemBusy !== null || isForeignFrozen || (cooldownSeconds > 0 && itemMode !== 'bomb')}
+          disabled={paused || !selectedPixel || itemBusy !== null || isForeignFrozen || cooldownSeconds > 0}
           title={`${itemMode === 'bomb' ? 'Взорвать' : itemMode === 'ice' ? 'Заморозить' : 'Закрасить'} (Enter)`}
-          aria-disabled={paused || !selectedPixel || itemBusy !== null || isForeignFrozen || (cooldownSeconds > 0 && itemMode !== 'bomb')}
+          aria-disabled={paused || !selectedPixel || itemBusy !== null || isForeignFrozen || cooldownSeconds > 0}
         >
           {paintLabel}
         </button>

@@ -2,27 +2,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Pixel, PlacementMessage } from '../types/pixel';
 
 type TrophyAwardedMessage = {
-  type: 'trophy_awarded';
-  eventId: string;
-  userId: string;
   nickname: string;
-  completed: boolean;
+  text: string;
 };
 
-export function dispatchTrophyAward(value: unknown) {
+function dispatchTrophyAward(value: unknown) {
   if (!value || typeof value !== 'object') return;
   const message = value as Record<string, unknown>;
-  if (message.type !== 'trophy_awarded' || typeof message.eventId !== 'string'
-    || typeof message.userId !== 'string' || typeof message.nickname !== 'string') return;
+  if (typeof message.nickname !== 'string' || typeof message.text !== 'string') return;
   window.dispatchEvent(new CustomEvent<TrophyAwardedMessage>('pixelbattle:trophy-awarded', {
     detail: {
-      type: 'trophy_awarded',
-      eventId: message.eventId,
-      userId: message.userId,
       nickname: message.nickname,
-      completed: message.completed === true,
+      text: message.text,
     },
   }));
+}
+
+function dispatchCaptchaRequired() {
+  window.dispatchEvent(new Event('pixelbattle:captcha-required'));
 }
 
 export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: () => void) {
@@ -52,7 +49,9 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data) as { type?: string; [key: string]: unknown };
-          if (message.type === 'error') {
+          if (message.type === 'captcha_required') {
+            dispatchCaptchaRequired();
+          } else if (message.type === 'error') {
             // Authentication failures are terminal for this captured initData.
             const code = String((message as { code?: unknown }).code ?? '').toLowerCase();
             if (code.includes('auth') || code.includes('telegram') || code.includes('expired') || code.includes('credential')) {
@@ -72,7 +71,7 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
             }
           } else if (message.type === 'board_reload') {
             onBoardReload();
-          } else if (message.type === 'trophy_awarded') {
+          } else if (typeof message.nickname === 'string' && typeof message.text === 'string') {
             dispatchTrophyAward(message);
           }
         } catch { /* Ignore malformed server messages. */ }
@@ -119,10 +118,14 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
       cache: 'no-store',
       keepalive: true,
     }).then(async (response) => {
-      if (!response.ok) return null;
-      const event = await response.json() as Pixel & { trophyAward?: TrophyAwardedMessage };
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null) as { captchaRequired?: boolean; code?: string } | null;
+        if (failure?.captchaRequired || failure?.code === 'captcha_required') dispatchCaptchaRequired();
+        return null;
+      }
+      const event = await response.json() as Pixel & { captchaRequired?: boolean };
       onPixel(event);
-      if (event.trophyAward) dispatchTrophyAward(event.trophyAward);
+      if (event.captchaRequired) dispatchCaptchaRequired();
       return event;
     }).catch(() => null);
   }, [onPixel]);

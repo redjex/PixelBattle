@@ -13,7 +13,7 @@ export type TelegramDeviceOrientation = {
 
 export type TelegramWebApp = {
   initData: string;
-  initDataUnsafe?: { user?: { id: number; username?: string; first_name?: string; photo_url?: string } };
+  initDataUnsafe?: { user?: { id: number; username?: string; first_name?: string; last_name?: string; photo_url?: string } };
   platform?: string;
   ready: () => void;
   expand: () => void;
@@ -59,6 +59,7 @@ export type AppAccess = {
   prizes: unknown[];
   pendingItemRewards: TrophyItemReward[];
   soldOutTrophies: string[];
+  captchaRequired: boolean;
 };
 
 export class TelegramAuthenticationError extends Error {
@@ -100,7 +101,7 @@ export async function fetchAppAccess(initData: string): Promise<AppAccess> {
   const soldOutTrophies = Array.isArray(payload.soldOutTrophies)
     ? payload.soldOutTrophies.filter((id): id is string => typeof id === 'string')
     : [];
-  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online, prizes, pendingItemRewards, soldOutTrophies };
+  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online, prizes, pendingItemRewards, soldOutTrophies, captchaRequired: payload.captchaRequired === true };
 }
 
 export async function authenticateTelegram(initData: string): Promise<AppAccess | null> {

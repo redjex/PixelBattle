@@ -127,7 +127,7 @@ export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating, onOpen
           </>
         )}
       </section>
-      <button className="stats-settings-button" onClick={onOpenSettings}>Настройки</button>
+      <button className="stats-settings-button" onClick={onOpenSettings}><span>Настройки</span></button>
       <button className="stats-back" onClick={onBack}>Назад</button>
     </div>
   );

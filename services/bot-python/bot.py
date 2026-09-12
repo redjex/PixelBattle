@@ -5,6 +5,7 @@ import threading
 import time
 import colorsys
 import re
+from datetime import datetime
 from typing import Any
 
 import redis
@@ -59,6 +60,11 @@ MAP_CHATS_KEY = "pixelbattle:map:chats"
 MAP_MESSAGE_KEY_PREFIX = "pixelbattle:map:message:"
 ADMIN_MENU_MESSAGE_KEY_PREFIX = "pixelbattle:admin:menu:message:"
 MAP_CLEAR_BACKUP_KEY = "pixelbattle:map:last_clear_backup"
+CAPTCHA_NOTIFICATION_KEY = "pixelbattle:captcha:admin_notifications"
+CAPTCHA_NOTIFICATION_POLL_SECONDS = 5
+CAPTCHA_SUSPICION_GRACE_SECONDS = 60
+CAPTCHA_ALERT_CHAT_ID = int(os.getenv("CAPTCHA_ALERT_CHAT_ID", "-1004326871238"))
+REWARD_REQUEST_POLL_SECONDS = 5
 
 FILL_COLORS = [
     "#FF8080",
@@ -155,6 +161,21 @@ def send_photo(
     if not response.ok or not result.get("ok"):
         raise RuntimeError("Telegram request failed")
     return result
+
+
+def send_document(chat_id: int, filename: str, content: bytes, caption: str = "") -> None:
+    response = requests.post(
+        f"{API}/sendDocument",
+        data={"chat_id": str(chat_id), "caption": caption},
+        files={"document": (filename, content, "video/mp4")},
+        timeout=120,
+    )
+    try:
+        result = response.json()
+    except ValueError:
+        raise RuntimeError("Telegram returned an invalid response") from None
+    if not response.ok or not result.get("ok"):
+        raise RuntimeError("Telegram request failed")
 
 
 def send_welcome(chat_id: int) -> None:
@@ -320,6 +341,9 @@ def admin_category(chat_id: int, category: str, notice: str | None = None) -> No
                 [{"text": pause_button, "callback_data": "admin:toggle_pause"}],
                 [{"text": test_mode_button, "callback_data": "admin:toggle_test_mode"}],
                 [{"text": "Онлайн и пик", "callback_data": "admin:online"}],
+                [{"text": "Запись игры", "callback_data": "admin:recording"}],
+                [{"text": "Сбросить весь прогресс", "callback_data": "admin:reset_all"}],
+                [{"text": "Включить капчу игроку", "callback_data": "admin:captcha:user"}],
                 [{"text": "Трофеи", "callback_data": "admin:trophies"}],
                 [{"text": "Выдать бомбы", "callback_data": "admin:items:bomb"}],
                 [{"text": "Выдать заморозки", "callback_data": "admin:items:ice"}],
@@ -389,16 +413,89 @@ def admin_trophies(chat_id: int, notice: str | None = None) -> None:
     )
 
 
+def recording_status() -> dict[str, Any]:
+    response = realtime_request("GET", "/api/admin/recording")
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+def admin_recording(chat_id: int, notice: str | None = None) -> None:
+    try:
+        state = recording_status()
+        active = bool(state.get("active"))
+        events = int(state.get("events", 0))
+        status = f"Статус: {'идёт запись' if active else 'запись выключена'}\nКадровых событий: {events}"
+    except (requests.RequestException, TypeError, ValueError):
+        active = False
+        status = "Не удалось получить состояние записи."
+    suffix = f"\n\n{notice}" if notice else ""
+    action = (
+        {"text": "Остановить и получить MP4", "callback_data": "admin:recording:stop"}
+        if active
+        else {"text": "Начать запись", "callback_data": "admin:recording:start"}
+    )
+    markup = {
+        "inline_keyboard": [
+            [action],
+            [{"text": "Обновить", "callback_data": "admin:recording"}],
+            [{"text": "Назад", "callback_data": "admin:category:game"}],
+        ]
+    }
+    send_admin_photo(chat_id, "game.png", f"Запись игры\n\n{status}{suffix}", markup)
+
+
+def start_recording(chat_id: int) -> None:
+    try:
+        response = realtime_request("POST", "/api/admin/recording/start")
+        response.raise_for_status()
+        admin_recording(chat_id, "Запись поля начата.")
+    except requests.RequestException:
+        admin_recording(chat_id, "Не удалось начать запись.")
+
+def confirm_reset_all(chat_id: int) -> None:
+    send_admin_photo(
+        chat_id,
+        "game.png",
+        "ВНИМАНИЕ\n\nЭто обнулит рейтинг, опыт, бомбы, заморозки и все трофеи у всех пользователей, а карту сделает белой. Действие необратимо.",
+        {"inline_keyboard": [[{"text": "Да, сбросить всё", "callback_data": "admin:reset_all_confirm"}], [{"text": "Отмена", "callback_data": "admin:category:game"}]]},
+    )
+
+def reset_all_progress(chat_id: int) -> None:
+    try:
+        response = realtime_request("POST", "/api/admin/reset-all")
+        response.raise_for_status()
+        admin_category(chat_id, "game", "Весь прогресс пользователей обнулён, карта очищена.")
+    except requests.RequestException:
+        admin_category(chat_id, "game", "Не удалось выполнить полный сброс.")
+
+
+def stop_recording(chat_id: int) -> None:
+    try:
+        response = realtime_request("POST", "/api/admin/recording/stop", timeout=600)
+        response.raise_for_status()
+        try:
+            send_document(chat_id, "pixelbattle-recording.mp4", response.content, "Запись поля PixelBattle")
+        except RuntimeError:
+            retry = realtime_request("POST", "/api/admin/recording/stop", timeout=600)
+            retry.raise_for_status()
+            send_document(chat_id, "pixelbattle-recording.mp4", retry.content, "Запись поля PixelBattle")
+        admin_recording(chat_id, "Запись остановлена, MP4 отправлен.")
+    except (requests.RequestException, RuntimeError):
+        admin_recording(chat_id, "Не удалось экспортировать запись в MP4.")
+
+
 def realtime_request(method: str, path: str, **kwargs: Any) -> requests.Response:
     if not ADMIN_API_TOKEN:
         raise requests.RequestException("Admin API credentials are not configured")
     headers = dict(kwargs.pop("headers", {}))
     headers["Authorization"] = f"Bearer {ADMIN_API_TOKEN}"
+    timeout = kwargs.pop("timeout", 30)
     return requests.request(
         method,
         f"{REALTIME_URL}{path}",
         headers=headers,
-        timeout=30,
+        timeout=timeout,
         allow_redirects=False,
         **kwargs,
     )
@@ -428,6 +525,132 @@ def grant_item(user_id: int, item: str, amount: int) -> dict[str, Any]:
     )
     response.raise_for_status()
     return response.json()
+
+
+def require_player_captcha(user_id: int) -> None:
+    response = realtime_request(
+        "POST", "/api/admin/captcha/require", json={"userId": str(user_id)}
+    )
+    response.raise_for_status()
+
+
+def fetch_captcha_statuses() -> list[dict[str, Any]]:
+    response = realtime_request("GET", "/api/admin/captcha/statuses")
+    response.raise_for_status()
+    payload = response.json()
+    players = payload.get("players", []) if isinstance(payload, dict) else []
+    return players if isinstance(players, list) else []
+
+
+def notify_admins_about_captcha_statuses() -> None:
+    for player in fetch_captcha_statuses():
+        if not isinstance(player, dict):
+            continue
+        user_id = str(player.get("userId", ""))
+        status = player.get("status")
+        updated_at = str(player.get("updatedAt", ""))
+        if (
+            not user_id.isdigit()
+            or status not in {"clean", "suspicious"}
+            or not updated_at
+        ):
+            continue
+        if status == "suspicious":
+            try:
+                status_changed_at = datetime.fromisoformat(
+                    updated_at.replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError:
+                continue
+            if time.time() - status_changed_at < CAPTCHA_SUSPICION_GRACE_SECONDS:
+                continue
+        username = database.hget(USER_ID_KEY, user_id)
+        label = f"@{username} (ID {user_id})" if username else f"ID {user_id}"
+        if status == "clean":
+            message = f"✅ {label} прошёл капчу — человек чистый."
+        else:
+            message = f"⚠️ {label} не прошёл капчу — пользователь под подозрением."
+        marker = f"{status}:{updated_at}"
+        notification_id = f"{CAPTCHA_ALERT_CHAT_ID}:{user_id}"
+        if database.hget(CAPTCHA_NOTIFICATION_KEY, notification_id) == marker:
+            continue
+        try:
+            send_message(CAPTCHA_ALERT_CHAT_ID, message)
+        except (RuntimeError, requests.RequestException):
+            print(
+                f"captcha notification failed: chat={CAPTCHA_ALERT_CHAT_ID} user={user_id} status={status}",
+                flush=True,
+            )
+            continue
+        database.hset(CAPTCHA_NOTIFICATION_KEY, notification_id, marker)
+        print(
+            f"captcha notification sent: chat={CAPTCHA_ALERT_CHAT_ID} user={user_id} status={status}",
+            flush=True,
+        )
+
+
+def captcha_notification_loop() -> None:
+    while True:
+        try:
+            notify_admins_about_captcha_statuses()
+        except Exception as exc:
+            print(
+                f"captcha notification loop error: {type(exc).__name__}", flush=True
+            )
+        time.sleep(CAPTCHA_NOTIFICATION_POLL_SECONDS)
+
+
+def fetch_trophy_reward_requests() -> list[dict[str, Any]]:
+    response = realtime_request("GET", "/api/admin/trophy-reward-requests")
+    response.raise_for_status()
+    payload = response.json()
+    requests_list = payload.get("requests", []) if isinstance(payload, dict) else []
+    return requests_list if isinstance(requests_list, list) else []
+
+
+def notify_admins_about_trophy_reward_requests() -> None:
+    for request in fetch_trophy_reward_requests():
+        if not isinstance(request, dict):
+            continue
+        request_id = request.get("requestId")
+        user_id = str(request.get("userId", ""))
+        trophy_id = str(request.get("trophyId", ""))
+        trophy_name = str(request.get("trophyName", "трофей"))
+        source = str(request.get("source", ""))
+        if not isinstance(request_id, int) or request_id <= 0 or not user_id.isdigit() or not trophy_id:
+            continue
+        username = database.hget(USER_ID_KEY, user_id)
+        label = f"@{username} (ID {user_id})" if username else f"ID {user_id}"
+        if source == "NFT":
+            message = f"🏆 {label} запросил получение NFT."
+        elif trophy_id == "bear-redjex":
+            message = f"🐻 {label} запросил мишку-redjex от redjex."
+        elif trophy_id == "bear":
+            message = f"🐻 {label} запросил мишку от Идейного Аниматора."
+        else:
+            message = f"🎁 {label} запросил получение: {trophy_name}."
+        delivered = True
+        for admin_id in ADMIN_IDS:
+            try:
+                send_message(admin_id, message)
+            except (RuntimeError, requests.RequestException):
+                delivered = False
+                print(f"trophy reward notification failed: request={request_id} admin={admin_id}", flush=True)
+        if delivered:
+            try:
+                response = realtime_request("POST", "/api/admin/trophy-reward-requests/ack", json={"requestId": request_id})
+                response.raise_for_status()
+            except requests.RequestException:
+                print(f"trophy reward notification ack failed: request={request_id}", flush=True)
+
+
+def trophy_reward_notification_loop() -> None:
+    while True:
+        try:
+            notify_admins_about_trophy_reward_requests()
+        except Exception as exc:
+            print(f"trophy reward notification loop error: {type(exc).__name__}", flush=True)
+        time.sleep(REWARD_REQUEST_POLL_SECONDS)
 
 
 def render_map() -> bytes:
@@ -926,6 +1149,25 @@ def apply_admin_action(admin_id: int, chat_id: int, text: str) -> None:
         seconds = int(raw)
         set_personal_rate_limit(target_id, seconds)
         send_message(chat_id, f"Рейтлимит для {label}: {seconds} сек.", delete_after=5)
+    elif action == "captcha_user":
+        user_id, label = resolve_user(text)
+        if user_id is None:
+            pending_actions[pending_key] = "captcha_user"
+            send_admin_prompt(
+                admin_id,
+                chat_id,
+                "Пользователь не найден. Отправь @username или Telegram ID ещё раз.",
+            )
+            return
+        try:
+            require_player_captcha(user_id)
+            admin_category(chat_id, "game", f"Капча включена для {label}.")
+        except requests.RequestException:
+            admin_category(
+                chat_id,
+                "game",
+                "Не удалось включить капчу. Проверь доступность сервера.",
+            )
     elif action == "quest_reset_user":
         user_id, label = resolve_user(text)
         if user_id is None:
@@ -1067,6 +1309,14 @@ def handle_callback(callback: dict[str, Any]) -> None:
         pending_actions[(user_id, chat_id)] = {"action": "item_user", "item": item}
         send_admin_prompt(user_id, chat_id, "Отправь @username или Telegram ID игрока.")
         return
+    if action == "admin:captcha:user":
+        pending_actions[(user_id, chat_id)] = "captcha_user"
+        send_admin_prompt(
+            user_id,
+            chat_id,
+            "Отправь @username или Telegram ID игрока, которому нужно включить капчу.",
+        )
+        return
     if action == "admin:quests:user":
         pending_actions[(user_id, chat_id)] = "quest_reset_user"
         send_admin_prompt(
@@ -1168,6 +1418,21 @@ def handle_callback(callback: dict[str, Any]) -> None:
         except (requests.RequestException, KeyError, ValueError):
             notice = "Не удалось получить статистику онлайна."
         admin_category(chat_id, "game", notice)
+        return
+    if action == "admin:recording":
+        admin_recording(chat_id)
+        return
+    if action == "admin:reset_all":
+        confirm_reset_all(chat_id)
+        return
+    if action == "admin:reset_all_confirm":
+        reset_all_progress(chat_id)
+        return
+    if action == "admin:recording:start":
+        start_recording(chat_id)
+        return
+    if action == "admin:recording:stop":
+        stop_recording(chat_id)
         return
     if action == "admin:list":
         ids = sorted(database.smembers(BYPASS_KEY), key=int)
@@ -1406,6 +1671,17 @@ def handle_message(message: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    if ADMIN_IDS:
+        threading.Thread(
+            target=captcha_notification_loop,
+            name="captcha-admin-notifications",
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=trophy_reward_notification_loop,
+            name="trophy-reward-admin-notifications",
+            daemon=True,
+        ).start()
     offset = 0
     while True:
         try:

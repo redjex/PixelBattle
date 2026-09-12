@@ -32,6 +32,11 @@ services:
       POSTGRES_DSN: ${POSTGRES_DSN:?Set POSTGRES_DSN with the matching database password}
       REDIS_CONSUMER_NAME: realtime-writer-${HOSTNAME:-local}
       TELEGRAM_INIT_DATA_MAX_AGE: ${TELEGRAM_INIT_DATA_MAX_AGE:-86400}
+      TROPHY_REWARDS_DIR: /run/secrets/pixelbattle-trophy-rewards
+      RECORDING_STATE_PATH: /var/lib/pixelbattle-recording/state.json
+    volumes:
+      - ../private/trophy-rewards:/run/secrets/pixelbattle-trophy-rewards:ro
+      - ../private/recording:/var/lib/pixelbattle-recording
     restart: unless-stopped
     stop_grace_period: 30s
     ports: ["127.0.0.1:8080:8080"]

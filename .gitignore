@@ -19,4 +19,6 @@ yes
 yes.pub
 *.tar.gz
 .deploy-baseline/
+private/trophy-rewards/*.txt
 .DS_Store
+.tmp-go-cache-*/

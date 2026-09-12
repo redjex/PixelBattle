@@ -169,13 +169,13 @@ func peerIP(r *http.Request) string {
 
 func allowedMethods(path string) string {
 	switch path {
-	case "/health", "/inline-map.jpg", "/ws", "/api/boards/main", "/api/boards/session", "/api/boards/main/stats", "/api/profiles/me", "/api/boards/main/image", "/api/admin/stats":
+	case "/health", "/inline-map.jpg", "/ws", "/api/boards/main", "/api/boards/session", "/api/boards/main/stats", "/api/profiles/me", "/api/boards/main/image", "/api/admin/stats", "/api/admin/recording", "/api/admin/captcha/statuses", "/api/admin/trophy-reward-requests":
 		return "GET"
-	case "/api/boards/main/rewards", "/api/admin/trophies/drop":
+	case "/api/boards/main/rewards", "/api/boards/captcha", "/api/admin/trophies/drop":
 		return "GET, POST"
 	case "/api/admin/boards/main/size", "/api/admin/game/pause", "/api/admin/game/test-mode":
 		return "GET, PUT"
-	case "/api/boards/main/pixels", "/api/boards/items/ice/activate", "/api/boards/items/bomb/use", "/api/admin/boards/main/fill", "/api/admin/boards/main/image", "/api/admin/boards/main/clear", "/api/admin/boards/main/restore", "/api/admin/quests/reset", "/api/admin/items/grant", "/api/admin/trophies/reset":
+	case "/api/boards/main/pixels", "/api/boards/items/ice/activate", "/api/boards/items/bomb/use", "/api/admin/boards/main/fill", "/api/admin/boards/main/image", "/api/admin/boards/main/clear", "/api/admin/boards/main/restore", "/api/admin/quests/reset", "/api/admin/items/grant", "/api/admin/trophies/reset", "/api/admin/captcha/require", "/api/admin/trophy-reward-requests/ack", "/api/admin/recording/start", "/api/admin/recording/stop", "/api/admin/reset-all":
 		return "POST"
 	}
 	if strings.HasPrefix(path, "/api/profiles/") || strings.HasPrefix(path, "/api/boards/profiles/") {
@@ -183,6 +183,9 @@ func allowedMethods(path string) string {
 	}
 	if strings.HasPrefix(path, "/api/boards/trophy-items/") && strings.HasSuffix(path, "/claim") {
 		return "POST"
+	}
+	if strings.HasPrefix(path, "/api/boards/trophies/") && strings.HasSuffix(path, "/reward") {
+		return "GET"
 	}
 	return ""
 }

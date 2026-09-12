@@ -12,6 +12,7 @@ import { QuestNotifications } from './components/QuestNotifications';
 import { preloadParallaxBackground } from './components/ParallaxBackground';
 import { preloadRatingRewards, RatingScreen } from './components/RatingScreen';
 import { GiftsCatalogScreen, GiftsScreen, preloadGiftAssets } from './components/GiftsScreen';
+import { CaptchaOverlay } from './components/CaptchaOverlay';
 
 export function App() {
   const [loading, setLoading] = useState(true);
@@ -91,30 +92,26 @@ export function App() {
   }, [loading, screen]);
 
   useEffect(() => {
-    const telegram = getTelegramWebApp();
-    if (!telegram?.initData) { setAuthState('denied'); return; }
-    telegram.ready();
-    // This game uses the whole Mini App surface for drawing and panning.
-    // Prevent Telegram's vertical swipe gesture from minimizing/closing it.
-    // The method is optional because older Telegram clients do not expose it.
-    telegram.disableVerticalSwipes?.();
-    telegram.expand();
     let active = true;
     let retryTimer = 0;
+    let telegramTimer = 0;
+    let sdkRetryScript: HTMLScriptElement | null = null;
+    let telegramChecks = 0;
     let failedAttempts = 0;
-    const authenticate = async () => {
+    const authenticate = async (initData: string) => {
       try {
-        const access = await authenticateTelegram(telegram.initData);
+        const access = await authenticateTelegram(initData);
         if (!active) return;
         if (!access) {
           setAuthState('invalid');
           return;
         }
         if (access.accessAllowed) {
-          void preloadBoardSnapshot(telegram.initData).catch(() => undefined);
-          void preloadStatistics(telegram.initData).catch(() => undefined);
-          void preloadRatingRewards(telegram.initData).catch(() => undefined);
-          const avatarUrl = telegram.initDataUnsafe?.user?.photo_url;
+          void preloadBoardSnapshot(initData).catch(() => undefined);
+          void preloadStatistics(initData).catch(() => undefined);
+          void preloadRatingRewards(initData).catch(() => undefined);
+          const telegram = getTelegramWebApp();
+          const avatarUrl = telegram?.initDataUnsafe?.user?.photo_url;
           if (avatarUrl && avatarUrl.startsWith('https://')) {
             const avatar = new Image();
             avatar.src = avatarUrl;
@@ -130,13 +127,48 @@ export function App() {
         }
         failedAttempts += 1;
         const delay = Math.min(4000, 500 * 2 ** Math.min(failedAttempts - 1, 3));
-        retryTimer = window.setTimeout(() => void authenticate(), delay);
+        retryTimer = window.setTimeout(() => void authenticate(initData), delay);
       }
     };
-    void authenticate();
+    const retryTelegramSdk = () => {
+      if (sdkRetryScript || getTelegramWebApp()) return;
+      const script = document.createElement('script');
+      sdkRetryScript = script;
+      script.src = `https://telegram.org/js/telegram-web-app.js?retry=${Date.now()}`;
+      script.onload = script.onerror = () => {
+        script.remove();
+        sdkRetryScript = null;
+        initializeTelegram();
+      };
+      document.head.appendChild(script);
+    };
+    const initializeTelegram = () => {
+      if (!active) return;
+      const telegram = getTelegramWebApp();
+      if (!telegram?.initData) {
+        // Some Telegram clients expose WebApp data shortly after the page has
+        // mounted. Keep waiting instead of permanently denying this session,
+        // and retry the external SDK if its initial request failed.
+        telegramChecks += 1;
+        if (!telegram && telegramChecks % 20 === 0) retryTelegramSdk();
+        telegramTimer = window.setTimeout(initializeTelegram, 250);
+        return;
+      }
+      telegram.ready();
+      // This game uses the whole Mini App surface for drawing and panning.
+      // Prevent Telegram's vertical swipe gesture from minimizing/closing it.
+      // The method is optional because older Telegram clients do not expose it.
+      telegram.disableVerticalSwipes?.();
+      telegram.expand();
+      void authenticate(telegram.initData);
+    };
+    initializeTelegram();
     return () => {
       active = false;
       window.clearTimeout(retryTimer);
+      window.clearTimeout(telegramTimer);
+      sdkRetryScript?.remove();
+      sdkRetryScript = null;
     };
   }, []);
 
@@ -153,11 +185,20 @@ export function App() {
       }).catch(() => undefined);
     };
     const timer = window.setInterval(syncAccess, 2500);
+    const handleTrophyAwarded = () => syncAccess();
+    window.addEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
     return () => {
       active = false;
       window.clearInterval(timer);
+      window.removeEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
     };
   }, [authState]);
+
+  useEffect(() => {
+    const requireCaptcha = () => setAppAccess((current) => current ? { ...current, captchaRequired: true } : current);
+    window.addEventListener('pixelbattle:captcha-required', requireCaptcha);
+    return () => window.removeEventListener('pixelbattle:captcha-required', requireCaptcha);
+  }, []);
 
   useEffect(() => {
     if (authState !== 'authorized') return;
@@ -212,5 +253,9 @@ export function App() {
       {!maintenanceMode && screen !== 'menu' && (screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} onOpenSettings={() => setScreen('settings')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'settings' ? <SettingsScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} pendingItemRewards={appAccess?.pendingItemRewards ?? []} onItemRewardClaimed={handleItemRewardClaimed} onOpenCatalog={() => setScreen('gifts-catalog')} onBack={() => setScreen('menu')} /> : screen === 'gifts-catalog' ? <GiftsCatalogScreen prizes={appAccess?.prizes ?? []} soldOutTrophies={appAccess?.soldOutTrophies ?? []} onBack={() => setScreen('gifts')} /> : <BattleScreen online={appAccess?.online ?? null} />)}
     </>}
     {!loading && !maintenanceMode && <QuestNotifications active={screen === 'map'} />}
+    <CaptchaOverlay
+      active={appAccess?.captchaRequired === true}
+      onSolved={() => setAppAccess((current) => current ? { ...current, captchaRequired: false } : current)}
+    />
   </section></main>;
 }

@@ -19,7 +19,7 @@ const normalizeBoardColor = (color: string) => color.toUpperCase() === '#F8F9FA'
 
 type TemplateState = { image: HTMLImageElement; canvas: HTMLCanvasElement; x: number; y: number; width: number; height: number };
 type TemplateGesture = { mode: 'move' | 'resize'; pointerId: number; startClientX: number; startClientY: number; startX: number; startY: number; startWidth: number; startHeight: number };
-type Props = { color: string; zoom: number; onZoom: (zoom: number) => void; eyedropper: boolean; onPickColor: (color: string) => void; onEyedropperEnd: () => void; paintNonce: number; useIce: boolean; onSelectPixel: (pixel: { x: number; y: number } | null) => void; onInspectPixel: (pixel: Pixel | null) => void; cooldownUntil: number; onPlacementAccepted: () => void; templateImageUrl: string | null; templatePlacement: TemplatePlacement | null; onTemplatePlacementChange: (placement: TemplatePlacement) => void };
+type Props = { color: string; zoom: number; onZoom: (zoom: number) => void; eyedropper: boolean; onPickColor: (color: string) => void; onEyedropperEnd: () => void; paintNonce: number; useIce: boolean; onSelectPixel: (pixel: { x: number; y: number } | null) => void; onInspectPixel: (pixel: Pixel | null) => void; cooldownUntil: number; onPlacementAccepted: () => void; templateImageUrl: string | null; templatePlacement: TemplatePlacement | null; templateOpacity: number; onTemplatePlacementChange: (placement: TemplatePlacement) => void };
 
 function renderTemplate(image: HTMLImageElement, width: number, height: number) {
   const canvas = document.createElement('canvas');
@@ -57,7 +57,7 @@ function renderTemplate(image: HTMLImageElement, width: number, height: number) 
   return canvas;
 }
 
-export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEyedropperEnd, paintNonce, useIce, onSelectPixel, onInspectPixel, cooldownUntil, onPlacementAccepted, templateImageUrl, templatePlacement, onTemplatePlacementChange }: Props) {
+export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEyedropperEnd, paintNonce, useIce, onSelectPixel, onInspectPixel, cooldownUntil, onPlacementAccepted, templateImageUrl, templatePlacement, templateOpacity, onTemplatePlacementChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const checkerPatternRef = useRef<CanvasPattern | null>(null);
   const boardLayerRef = useRef<HTMLCanvasElement | null>(null);
@@ -70,6 +70,9 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   const templateGestureRef = useRef<TemplateGesture | null>(null);
   const templateMoveIconRef = useRef<HTMLImageElement | null>(null);
   const templateResizeIconRef = useRef<HTMLImageElement | null>(null);
+  const templateWatchIconRef = useRef<HTMLImageElement | null>(null);
+  const templateWatchPointerRef = useRef<number | null>(null);
+  const templateTemporarilyHiddenRef = useRef(false);
   const boardSizeRef = useRef({ width: DEFAULT_BOARD_SIZE, height: DEFAULT_BOARD_SIZE });
   const panRef = useRef({ x: 0, y: 0 });
   const dragRef = useRef<{ x: number; y: number; cellX: number; cellY: number; moved: boolean; longPressed: boolean; pointerId: number } | null>(null);
@@ -119,18 +122,24 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   useEffect(() => {
     const moveIcon = new Image();
     const resizeIcon = new Image();
+    const watchIcon = new Image();
     const refresh = () => setRevision((value) => value + 1);
     moveIcon.onload = refresh;
     resizeIcon.onload = refresh;
+    watchIcon.onload = refresh;
     moveIcon.src = '/assets/move.svg';
     resizeIcon.src = '/assets/upscale.svg';
+    watchIcon.src = '/assets/watch.svg';
     templateMoveIconRef.current = moveIcon;
     templateResizeIconRef.current = resizeIcon;
+    templateWatchIconRef.current = watchIcon;
     return () => {
       moveIcon.onload = null;
       resizeIcon.onload = null;
+      watchIcon.onload = null;
       templateMoveIconRef.current = null;
       templateResizeIconRef.current = null;
+      templateWatchIconRef.current = null;
     };
   }, []);
 
@@ -197,6 +206,8 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   useEffect(() => {
     templateRef.current = null;
     templateGestureRef.current = null;
+    templateWatchPointerRef.current = null;
+    templateTemporarilyHiddenRef.current = false;
     setRevision((value) => value + 1);
     if (!templateImageUrl || !boardDimensions) return;
     let disposed = false;
@@ -369,9 +380,9 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
         const templateVisibleBottom = Math.min(template.height, Math.ceil((rect.height - templateTop) / cell));
         const templateVisibleWidth = templateVisibleRight - templateVisibleLeft;
         const templateVisibleHeight = templateVisibleBottom - templateVisibleTop;
-        if (templateVisibleWidth > 0 && templateVisibleHeight > 0) {
+        if (templateVisibleWidth > 0 && templateVisibleHeight > 0 && !templateTemporarilyHiddenRef.current) {
           context.save();
-          context.globalAlpha = 0.46;
+          context.globalAlpha = Math.max(0, Math.min(1, templateOpacity));
           context.imageSmoothingEnabled = false;
           context.drawImage(
             template.canvas,
@@ -387,7 +398,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
           context.restore();
         }
 
-        const drawTemplateHandle = (centerX: number, centerY: number, kind: 'move' | 'resize') => {
+        const drawTemplateHandle = (centerX: number, centerY: number, kind: 'move' | 'resize' | 'watch') => {
           context.save();
           context.fillStyle = '#fff';
           context.strokeStyle = '#000';
@@ -396,14 +407,17 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
           context.roundRect(centerX - 15, centerY - 15, 30, 30, 6);
           context.fill();
           context.stroke();
-          const icon = kind === 'move' ? templateMoveIconRef.current : templateResizeIconRef.current;
+          const icon = kind === 'move' ? templateMoveIconRef.current : kind === 'resize' ? templateResizeIconRef.current : templateWatchIconRef.current;
           if (icon?.complete && icon.naturalWidth > 0) {
-            const iconSize = kind === 'move' ? 17 : 16;
-            context.drawImage(icon, centerX - iconSize / 2, centerY - iconSize / 2, iconSize, iconSize);
+            const iconWidth = kind === 'watch' ? 22 : kind === 'move' ? 17 : 16;
+            const iconHeight = kind === 'watch' ? 15 : iconWidth;
+            if (kind === 'watch') context.filter = 'brightness(0)';
+            context.drawImage(icon, centerX - iconWidth / 2, centerY - iconHeight / 2, iconWidth, iconHeight);
           }
           context.restore();
         };
         drawTemplateHandle(templateLeft + 18, templateTop + 18, 'move');
+        drawTemplateHandle(templateRight - 18, templateTop + 18, 'watch');
         drawTemplateHandle(templateRight - 18, templateBottom - 18, 'resize');
       }
       const selected = selectedRef.current;
@@ -446,7 +460,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [zoom, revision]);
+  }, [zoom, revision, templateOpacity]);
 
   function getCell(event: React.PointerEvent<HTMLCanvasElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -489,6 +503,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     const inset = 18;
     return {
       move: { x: left + inset, y: top + inset },
+      watch: { x: right - inset, y: top + inset },
       resize: { x: right - inset, y: bottom - inset },
     };
   }
@@ -502,6 +517,14 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       const localX = event.clientX - rect.left;
       const localY = event.clientY - rect.top;
       const hitRadius = 22;
+      const watching = handles && Math.hypot(localX - handles.watch.x, localY - handles.watch.y) <= hitRadius;
+      if (watching) {
+        templateWatchPointerRef.current = event.pointerId;
+        templateTemporarilyHiddenRef.current = true;
+        dragRef.current = null;
+        scheduleViewRender();
+        return;
+      }
       const mode = handles && Math.hypot(localX - handles.move.x, localY - handles.move.y) <= hitRadius
         ? 'move'
         : handles && Math.hypot(localX - handles.resize.x, localY - handles.resize.y) <= hitRadius
@@ -570,6 +593,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (templateWatchPointerRef.current === event.pointerId) return;
     const templateGesture = templateGestureRef.current;
     if (templateGesture?.pointerId === event.pointerId) {
       const template = templateRef.current;
@@ -661,6 +685,12 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   }
 
   function handlePointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (templateWatchPointerRef.current === event.pointerId) {
+      templateWatchPointerRef.current = null;
+      templateTemporarilyHiddenRef.current = false;
+      scheduleViewRender();
+      return;
+    }
     const templateGesture = templateGestureRef.current;
     if (templateGesture?.pointerId === event.pointerId) {
       templateGestureRef.current = null;

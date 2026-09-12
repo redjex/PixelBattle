@@ -10,12 +10,15 @@ import (
 	"log"
 	"math/rand/v2"
 	"pixelbattle/realtime/internal/domain"
+	"sync"
 	"time"
 )
 
 type Writer struct {
-	pool  *pgxpool.Pool
-	lease *pgxpool.Conn
+	pool        *pgxpool.Pool
+	lease       *pgxpool.Conn
+	rewardMu    sync.RWMutex
+	rewardCache map[string]TrophyReward
 }
 
 type UserStats struct {
@@ -230,6 +233,28 @@ CREATE TABLE IF NOT EXISTS trophy_winners (
  completed_at timestamptz NOT NULL DEFAULT NOW(),
  PRIMARY KEY (trophy_id,user_id)
 );
+CREATE TABLE IF NOT EXISTS trophy_reward_assignments (
+ user_id text NOT NULL,
+ trophy_id text NOT NULL,
+ reward_kind text NOT NULL CHECK (reward_kind IN ('code','url')),
+ reward_value text NOT NULL,
+ assigned_at timestamptz NOT NULL DEFAULT NOW(),
+ PRIMARY KEY (user_id,trophy_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS trophy_reward_assignments_unique_code_idx
+ON trophy_reward_assignments(trophy_id,reward_value) WHERE reward_kind='code';
+CREATE TABLE IF NOT EXISTS trophy_reward_requests (
+ request_id bigserial PRIMARY KEY,
+ user_id text NOT NULL,
+ trophy_id text NOT NULL,
+ trophy_name text NOT NULL,
+ source text NOT NULL,
+ requested_at timestamptz NOT NULL DEFAULT NOW(),
+ notified_at timestamptz,
+ UNIQUE(user_id,trophy_id)
+);
+CREATE INDEX IF NOT EXISTS trophy_reward_requests_pending_idx
+ON trophy_reward_requests(requested_at) WHERE notified_at IS NULL;
 INSERT INTO trophy_winners(trophy_id,user_id)
 SELECT prize->>'id',profiles.telegram_id
 FROM profiles
@@ -544,6 +569,170 @@ func (w *Writer) Prizes(ctx context.Context, telegramID string) (json.RawMessage
 	return json.RawMessage(prizes), nil
 }
 
+var (
+	ErrTrophyNotCompleted   = errors.New("trophy is not completed")
+	ErrTrophyRewardDepleted = errors.New("trophy rewards are depleted")
+)
+
+type TrophyReward struct {
+	TrophyID string `json:"trophyId"`
+	Kind     string `json:"kind"`
+	Value    string `json:"value"`
+}
+
+type TrophyRewardRequest struct {
+	RequestID   int64     `json:"requestId"`
+	UserID      string    `json:"userId"`
+	TrophyID    string    `json:"trophyId"`
+	TrophyName  string    `json:"trophyName"`
+	Source      string    `json:"source"`
+	RequestedAt time.Time `json:"requestedAt"`
+}
+
+func (w *Writer) RecordTrophyRewardRequest(ctx context.Context, userID, trophyID, trophyName, source string) (bool, error) {
+	result, err := w.pool.Exec(ctx, `INSERT INTO trophy_reward_requests(user_id,trophy_id,trophy_name,source) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,trophy_id) DO NOTHING`, userID, trophyID, trophyName, source)
+	return result.RowsAffected() == 1, err
+}
+
+func (w *Writer) PendingTrophyRewardRequests(ctx context.Context) ([]TrophyRewardRequest, error) {
+	rows, err := w.pool.Query(ctx, `SELECT request_id,user_id,trophy_id,trophy_name,source,requested_at FROM trophy_reward_requests WHERE notified_at IS NULL ORDER BY request_id LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	requests := make([]TrophyRewardRequest, 0)
+	for rows.Next() {
+		var request TrophyRewardRequest
+		if err := rows.Scan(&request.RequestID, &request.UserID, &request.TrophyID, &request.TrophyName, &request.Source, &request.RequestedAt); err != nil {
+			return nil, err
+		}
+		requests = append(requests, request)
+	}
+	return requests, rows.Err()
+}
+
+func (w *Writer) MarkTrophyRewardRequestNotified(ctx context.Context, requestID int64) (bool, error) {
+	result, err := w.pool.Exec(ctx, `UPDATE trophy_reward_requests SET notified_at=NOW() WHERE request_id=$1 AND notified_at IS NULL`, requestID)
+	return result.RowsAffected() == 1, err
+}
+
+func (w *Writer) ClaimTrophyReward(ctx context.Context, userID, trophyID, kind string, loadCandidates func() ([]string, error)) (TrophyReward, error) {
+	cacheKey := userID + "\x00" + trophyID
+	w.rewardMu.RLock()
+	cached, cachedOK := w.rewardCache[cacheKey]
+	w.rewardMu.RUnlock()
+	if cachedOK {
+		return cached, nil
+	}
+	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return TrophyReward{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT prizes FROM profiles WHERE telegram_id=$1 FOR UPDATE`, userID).Scan(&raw); err != nil {
+		if err == pgx.ErrNoRows {
+			return TrophyReward{}, ErrTrophyNotCompleted
+		}
+		return TrophyReward{}, err
+	}
+	var prizes []struct {
+		ID             string `json:"id"`
+		CollectedParts int    `json:"collectedParts"`
+		Total          int    `json:"total"`
+	}
+	if err := json.Unmarshal(raw, &prizes); err != nil {
+		return TrophyReward{}, err
+	}
+	completed := false
+	for _, prize := range prizes {
+		if prize.ID == trophyID && prize.Total > 1 && prize.CollectedParts >= prize.Total {
+			completed = true
+			break
+		}
+	}
+	if !completed {
+		return TrophyReward{}, ErrTrophyNotCompleted
+	}
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "trophy-reward:"+trophyID); err != nil {
+		return TrophyReward{}, err
+	}
+	reward := TrophyReward{TrophyID: trophyID}
+	err = tx.QueryRow(ctx, `SELECT reward_kind,reward_value FROM trophy_reward_assignments WHERE user_id=$1 AND trophy_id=$2`, userID, trophyID).Scan(&reward.Kind, &reward.Value)
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return TrophyReward{}, err
+		}
+		w.cacheTrophyReward(cacheKey, reward)
+		return reward, nil
+	}
+	if err != pgx.ErrNoRows {
+		return TrophyReward{}, err
+	}
+
+	candidates, err := loadCandidates()
+	if err != nil {
+		return TrophyReward{}, err
+	}
+	if len(candidates) == 0 {
+		return TrophyReward{}, ErrTrophyRewardDepleted
+	}
+	if kind != "code" && kind != "url" {
+		return TrophyReward{}, fmt.Errorf("invalid trophy reward kind %q", kind)
+	}
+	value := candidates[0]
+	if len(candidates) > 1 {
+		rows, queryErr := tx.Query(ctx, `SELECT reward_value FROM trophy_reward_assignments WHERE trophy_id=$1 AND reward_kind=$2`, trophyID, kind)
+		if queryErr != nil {
+			return TrophyReward{}, queryErr
+		}
+		used := make(map[string]struct{})
+		for rows.Next() {
+			var existing string
+			if scanErr := rows.Scan(&existing); scanErr != nil {
+				rows.Close()
+				return TrophyReward{}, scanErr
+			}
+			used[existing] = struct{}{}
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return TrophyReward{}, rowsErr
+		}
+		rows.Close()
+		value = ""
+		for _, candidate := range candidates {
+			if _, taken := used[candidate]; !taken {
+				value = candidate
+				break
+			}
+		}
+		if value == "" {
+			return TrophyReward{}, ErrTrophyRewardDepleted
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO trophy_reward_assignments(user_id,trophy_id,reward_kind,reward_value) VALUES($1,$2,$3,$4)`, userID, trophyID, kind, value); err != nil {
+		return TrophyReward{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return TrophyReward{}, err
+	}
+	result := TrophyReward{TrophyID: trophyID, Kind: kind, Value: value}
+	w.cacheTrophyReward(cacheKey, result)
+	return result, nil
+}
+
+func (w *Writer) cacheTrophyReward(key string, reward TrophyReward) {
+	w.rewardMu.Lock()
+	if w.rewardCache == nil {
+		w.rewardCache = make(map[string]TrophyReward)
+	}
+	w.rewardCache[key] = reward
+	w.rewardMu.Unlock()
+}
+
 func (w *Writer) SoldOutTrophies(ctx context.Context) ([]string, error) {
 	counts := make(map[string]int64, len(trophyDefinitions))
 	rows, err := w.pool.Query(ctx, `SELECT trophy_id,COUNT(*) FROM trophy_winners GROUP BY trophy_id`)
@@ -673,12 +862,14 @@ type trophyDefinition struct {
 }
 
 var trophyDefinitions = []trophyDefinition{
-	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 100, Cap: 50, RewardItem: "experience", RewardAmount: 100, Rarity: "common"},
-	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомба", Total: 1}, Weight: 100, Cap: 500, RewardItem: "bomb", RewardAmount: 5, Repeatable: true, Rarity: "common"},
-	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозка", Total: 1}, Weight: 100, Cap: 500, RewardItem: "ice", RewardAmount: 1, Repeatable: true, Rarity: "common"},
+	{TrophyPrize: TrophyPrize{ID: "experience", Name: "Опыт", Total: 1}, Weight: 500, Cap: 500, RewardItem: "experience", RewardAmount: 100, Rarity: "common"},
+	{TrophyPrize: TrophyPrize{ID: "bomb", Name: "Бомбы ×5", Total: 1}, Weight: 500, Cap: 500, RewardItem: "bomb", RewardAmount: 5, Repeatable: true, Rarity: "common"},
+	{TrophyPrize: TrophyPrize{ID: "ice", Name: "Заморозки ×5", Total: 1}, Weight: 500, Cap: 500, RewardItem: "ice", RewardAmount: 5, Repeatable: true, Rarity: "common"},
 	{TrophyPrize: TrophyPrize{ID: "stickers", Name: "Стикеры", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
 	{TrophyPrize: TrophyPrize{ID: "yng-explrz", Name: "YNG EXPLRZ", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
 	{TrophyPrize: TrophyPrize{ID: "besigned", Name: "BeSigned", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
+	{TrophyPrize: TrophyPrize{ID: "stikidbot", Name: "StikIdBot", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
+	{TrophyPrize: TrophyPrize{ID: "stashvpn", Name: "StashVPN", Total: 2}, Weight: 100, Cap: 50, Rarity: "uncommon"},
 	{TrophyPrize: TrophyPrize{ID: "bear", Name: "Мишка", Total: 2}, Weight: 30, Cap: 20, Rarity: "rare"},
 	{TrophyPrize: TrophyPrize{ID: "bear-redjex", Name: "Мишка от redjex", Total: 2}, Weight: 30, Cap: 5, Rarity: "rare"},
 	{TrophyPrize: TrophyPrize{ID: "liberty-figure-252202", Name: "LibertyFigure #252202", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
@@ -721,8 +912,10 @@ func trophyAccountLimitReached(rarity string, received map[string]int) bool {
 var trophyLocation = time.FixedZone("Asia/Yekaterinburg", 5*60*60)
 
 const (
-	nftPartsPerCampaign = 20
-	nftPersonalCooldown = 45 * time.Minute
+	nftPartsPerCampaign     = 20
+	nftPersonalCooldown     = 45 * time.Minute
+	trophyChanceMultiplier  = 0.70
+	minimumTrophyPlacements = 5
 )
 
 func nftInventoryDropChance(counts map[string]int) float64 {
@@ -734,17 +927,17 @@ func nftInventoryDropChance(counts map[string]int) float64 {
 	}
 	switch {
 	case total == 0:
-		return 1
+		return 1 * trophyChanceMultiplier
 	case total == 1:
-		return 0.55
+		return 0.55 * trophyChanceMultiplier
 	case total == 2:
-		return 0.35
+		return 0.35 * trophyChanceMultiplier
 	case total == 3:
-		return 0.22
+		return 0.22 * trophyChanceMultiplier
 	case total <= 5:
-		return 0.12
+		return 0.12 * trophyChanceMultiplier
 	default:
-		return 0.05
+		return 0.05 * trophyChanceMultiplier
 	}
 }
 
@@ -791,7 +984,7 @@ func TrophyDropChance(now time.Time, online int64) float64 {
 	case hour >= 18 && hour < 23:
 		timeMultiplier = 1.35
 	}
-	return 0.008 * onlineMultiplier * timeMultiplier
+	return 0.008 * onlineMultiplier * timeMultiplier * trophyChanceMultiplier
 }
 
 func (w *Writer) TrophyDropForced(ctx context.Context) (bool, error) {
@@ -919,6 +1112,15 @@ func (w *Writer) ClaimTrophyPart(ctx context.Context, userID string, now time.Ti
 	if err := tx.QueryRow(ctx, `SELECT force_next FROM trophy_drop_state WHERE id=1 FOR UPDATE`).Scan(&forced); err != nil {
 		return nil, err
 	}
+	if !forced {
+		var previousPlacements int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM pixel_events WHERE user_id=$1`, userID).Scan(&previousPlacements); err != nil {
+			return nil, err
+		}
+		if previousPlacements < minimumTrophyPlacements-1 {
+			return nil, tx.Commit(ctx)
+		}
+	}
 	var plannedSequence int
 	var plannedID string
 	plannedErr := tx.QueryRow(ctx, `
@@ -985,7 +1187,7 @@ LIMIT 1`, plannedID, 4).Scan(&leaderID)
 		if now.Sub(latestNFTDrop) < nftPersonalCooldown {
 			return nil, tx.Commit(ctx)
 		}
-		if plannedRemaining > 4 && rand.Float64() >= nftInventoryDropChance(counts) {
+		if rand.Float64() >= nftInventoryDropChance(counts) {
 			return nil, tx.Commit(ctx)
 		}
 	}
@@ -1284,6 +1486,27 @@ ON CONFLICT(scope) DO UPDATE SET reset_at=EXCLUDED.reset_at`, scope)
 	return err
 }
 
+func (w *Writer) ResetAllProgress(ctx context.Context) error {
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	queries := []string{`INSERT INTO daily_quest_resets(scope,reset_at) VALUES('progress:all',NOW()) ON CONFLICT(scope) DO UPDATE SET reset_at=EXCLUDED.reset_at`, `DELETE FROM pixel_events`, `DELETE FROM board_pixels`, `UPDATE board_snapshots SET pixels='[]'::jsonb,version=version+1,event_version=0,updated_at=NOW()`, `UPDATE player_items SET bombs=0,ice=0,experience=0,freeze_remaining=0,updated_at=NOW()`, `UPDATE profiles SET prizes='[]'::jsonb,updated_at=NOW()`, `DELETE FROM level_reward_claims`, `DELETE FROM trophy_winners`, `DELETE FROM trophy_reward_assignments`, `DELETE FROM trophy_reward_claims`, `DELETE FROM trophy_reward_requests`, `DELETE FROM trophy_nft_winners`, `UPDATE trophy_nft_plan SET claimed_at=NULL,winner_user_id=NULL`, `UPDATE trophy_drop_state SET force_next=false,next_drop_at=NOW() + ((600+floor(random()*301))::text||' seconds')::interval`}
+	for _, query := range queries {
+		if _, err := tx.Exec(ctx, query); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	w.rewardMu.Lock()
+	w.rewardCache = nil
+	w.rewardMu.Unlock()
+	return nil
+}
+
 func (w *Writer) WriteSnapshot(ctx context.Context, boardID string, pixels []domain.BoardPixel, watermark int64, size BoardSize) error {
 	raw, err := json.Marshal(pixels)
 	if err != nil {
@@ -1315,7 +1538,9 @@ func (w *Writer) WriteBatch(ctx context.Context, events []domain.PixelEvent) err
 	defer tx.Rollback(ctx)
 	for _, event := range events {
 		tag, err := tx.Exec(ctx, `INSERT INTO pixel_events(event_id,operation_id,board_id,x,y,color,user_id,version,created_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, event.EventID, event.OperationID, event.BoardID, event.X, event.Y, event.Color, event.UserID, event.Version, event.CreatedAt)
+SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9
+WHERE $9 >= COALESCE((SELECT reset_at FROM daily_quest_resets WHERE scope='progress:all'),'-infinity'::timestamptz)
+ON CONFLICT DO NOTHING`, event.EventID, event.OperationID, event.BoardID, event.X, event.Y, event.Color, event.UserID, event.Version, event.CreatedAt)
 		if err != nil {
 			return err
 		}

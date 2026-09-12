@@ -28,12 +28,14 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"pixelbattle/realtime/internal/access"
+	"pixelbattle/realtime/internal/antibot"
 	"pixelbattle/realtime/internal/auth"
 	"pixelbattle/realtime/internal/domain"
 	"pixelbattle/realtime/internal/persistence"
 	"pixelbattle/realtime/internal/queue"
 	"pixelbattle/realtime/internal/realtime"
 	"pixelbattle/realtime/internal/state"
+	"pixelbattle/realtime/internal/trophyrewards"
 )
 
 var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
@@ -52,6 +54,9 @@ func main() {
 	hub := realtime.NewHub()
 	presence := newAppPresence(10 * time.Second)
 	cooldown := realtime.NewCooldown()
+	captchaGuard := antibot.New()
+	trophyRewardCatalog := trophyrewards.New(env("TROPHY_REWARDS_DIR", "/run/secrets/pixelbattle-trophy-rewards"))
+	recorder := newGameRecorder(env("RECORDING_STATE_PATH", "/var/lib/pixelbattle-recording/state.json"))
 	memoryQueue := queue.NewMemory()
 	var eventQueue queue.EventQueue = memoryQueue
 	var writer *persistence.Writer
@@ -165,14 +170,14 @@ func main() {
 	checkpoint := func(ctx context.Context) error {
 		return writer.WriteSnapshot(ctx, "main", boardStore.Snapshot("main"), version.Load(), persistence.BoardSize{Width: int(boardWidth.Load()), Height: int(boardHeight.Load())})
 	}
-	awardDueTrophy := func(ctx context.Context, userID string, author domain.PixelAuthor) *trophyAwardEvent {
+	awardDueTrophy := func(ctx context.Context, userID string, author domain.PixelAuthor) {
 		if writer == nil {
-			return nil
+			return
 		}
 		claim, err := writer.ClaimTrophyPart(ctx, userID, time.Now().UTC(), presence.Count())
 		if err != nil {
 			log.Printf("trophy drop failed for user=%s: %v", userID, err)
-			return nil
+			return
 		}
 		if claim != nil {
 			prize := claim.TrophyPrize
@@ -193,16 +198,17 @@ func main() {
 			if nickname == "" {
 				nickname = winner.DisplayName
 			}
-			notification := &trophyAwardEvent{Type: "trophy_awarded", EventID: id(), UserID: winnerID, Nickname: nickname, Completed: prize.CollectedParts >= prize.Total}
+			if nickname == "" {
+				nickname = "участнику"
+			}
+			notification := trophyAwardEvent{Nickname: nickname, Text: "Игроку " + nickname + " выпал трофей!"}
 			payload, marshalErr := json.Marshal(notification)
 			if marshalErr != nil {
 				log.Printf("trophy notification encoding failed for user=%s: %v", userID, marshalErr)
-				return nil
+				return
 			}
 			hub.Broadcast(payload)
-			return notification
 		}
-		return nil
 	}
 	allowedOrigin := env("GO_ALLOWED_ORIGIN", "http://localhost:5173")
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
@@ -275,7 +281,43 @@ func main() {
 				log.Printf("trophy availability failed: %v", err)
 			}
 		}
-		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "prizes": prizes, "pendingItemRewards": pendingItemRewards, "soldOutTrophies": soldOutTrophies, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true})
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "prizes": prizes, "pendingItemRewards": pendingItemRewards, "soldOutTrophies": soldOutTrophies, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true, "captchaRequired": captchaGuard.Required(identity, time.Now().UTC())})
+	})
+	http.HandleFunc("/api/boards/captcha", func(w http.ResponseWriter, r *http.Request) {
+		telegramUser, err := telegramUserFromRequest(r)
+		if err != nil {
+			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
+			return
+		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		now := time.Now().UTC()
+		if r.Method == http.MethodPost {
+			var request struct {
+				ChallengeID string `json:"challengeId"`
+				Answer      string `json:"answer"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.ChallengeID) > 64 || len(request.Answer) > 16 {
+				http.Error(w, "invalid captcha answer", http.StatusBadRequest)
+				return
+			}
+			if captchaGuard.Verify(identity, request.ChallengeID, request.Answer, now) {
+				log.Printf("captcha verified: user=%s", identity)
+				writeJSON(w, map[string]any{"verified": true, "required": false})
+				return
+			}
+			log.Printf("captcha verification failed: user=%s", identity)
+		}
+		challenge, required, err := captchaGuard.Challenge(identity, now)
+		if err != nil {
+			http.Error(w, "captcha unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !required {
+			writeJSON(w, map[string]any{"verified": true, "required": false})
+			return
+		}
+		writeJSON(w, map[string]any{"verified": false, "required": true, "challengeId": challenge.ID, "image": challenge.Image})
 	})
 	http.HandleFunc("/api/boards/main/rewards", func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -380,6 +422,59 @@ func main() {
 		}
 		writeJSON(w, map[string]any{"claimed": true, "reward": reward, "inventory": inventory})
 	})
+	http.HandleFunc("/api/boards/trophies/", func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/api/boards/trophies/"
+		const suffix = "/reward"
+		if !strings.HasSuffix(r.URL.Path, suffix) {
+			http.NotFound(w, r)
+			return
+		}
+		trophyID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), suffix)
+		if trophyID == "" || strings.Contains(trophyID, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		kind, supported := trophyRewardCatalog.Kind(trophyID)
+		if !supported {
+			http.NotFound(w, r)
+			return
+		}
+		telegramUser, err := telegramUserFromRequest(r)
+		if err != nil {
+			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "rewards unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		reward, err := writer.ClaimTrophyReward(r.Context(), identity, trophyID, string(kind), func() ([]string, error) {
+			return trophyRewardCatalog.Entries(trophyID)
+		})
+		if errors.Is(err, persistence.ErrTrophyNotCompleted) {
+			http.Error(w, "trophy is not completed", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, persistence.ErrTrophyRewardDepleted) {
+			http.Error(w, "reward is unavailable", http.StatusGone)
+			return
+		}
+		if err != nil {
+			log.Printf("trophy reward failed: user=%s trophy=%s: %v", identity, trophyID, err)
+			http.Error(w, "reward is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if source := trophyRewardRequestSource(trophyID); source != "" {
+			if _, requestErr := writer.RecordTrophyRewardRequest(r.Context(), identity, trophyID, trophyRewardName(trophyID), source); requestErr != nil {
+				log.Printf("trophy reward request failed: user=%s trophy=%s: %v", identity, trophyID, requestErr)
+				http.Error(w, "reward request is unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, reward)
+	})
 	http.HandleFunc("/api/boards/items/ice/activate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -390,11 +485,16 @@ func main() {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
 			return
 		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		if captchaGuard.Required(identity, time.Now().UTC()) {
+			writeCaptchaRequired(w)
+			return
+		}
 		if writer == nil {
 			http.Error(w, "inventory unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		inventory, activated, err := writer.ActivateIce(r.Context(), strconv.FormatInt(telegramUser.ID, 10))
+		inventory, activated, err := writer.ActivateIce(r.Context(), identity)
 		if err != nil {
 			http.Error(w, "failed to activate ice", http.StatusServiceUnavailable)
 			return
@@ -415,6 +515,11 @@ func main() {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
 			return
 		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		if captchaGuard.Required(identity, time.Now().UTC()) {
+			writeCaptchaRequired(w)
+			return
+		}
 		if writer != nil {
 			if err := writer.UpsertProfile(r.Context(), profileFromTelegram(telegramUser)); err != nil {
 				log.Printf("profile upsert failed for user=%d: %v", telegramUser.ID, err)
@@ -432,7 +537,6 @@ func main() {
 			http.Error(w, "invalid pixel placement", http.StatusBadRequest)
 			return
 		}
-		identity := strconv.FormatInt(telegramUser.ID, 10)
 		now := time.Now().UTC()
 		var existingFreeze *time.Time
 		if current, ok := boardStore.Pixel(request.BoardID, request.X, request.Y); ok && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
@@ -444,7 +548,8 @@ func main() {
 			}
 			existingFreeze = current.FrozenUntil
 		}
-		if userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown); userCooldown > 0 {
+		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
+		if userCooldown > 0 {
 			if allowed, retryAfter := cooldown.Allow(identity, request.BoardID, userCooldown, time.Now()); !allowed {
 				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 				http.Error(w, "placement cooldown", http.StatusTooManyRequests)
@@ -475,7 +580,12 @@ func main() {
 			return
 		}
 		boardStore.Apply(event)
-		trophyAward := awardDueTrophy(r.Context(), identity, author)
+		recorder.Record(event)
+		captchaRequired := captchaGuard.RecordPlacement(identity, now, userCooldown)
+		if captchaRequired {
+			log.Printf("captcha required after suspicious placement timing: user=%s", identity)
+		}
+		awardDueTrophy(r.Context(), identity, author)
 		if freezeChargeUsed && writer != nil {
 			_ = checkpoint(r.Context())
 		}
@@ -483,7 +593,7 @@ func main() {
 		publicEvent := eventForClient(event)
 		payload, _ := json.Marshal(publicEvent)
 		hub.Broadcast(payload)
-		publicEvent.TrophyAward = trophyAward
+		publicEvent.CaptchaRequired = captchaRequired
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, publicEvent)
 	})
@@ -497,6 +607,11 @@ func main() {
 		telegramUser, err := telegramUserFromRequest(r)
 		if err != nil {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
+			return
+		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		if captchaGuard.Required(identity, time.Now().UTC()) {
+			writeCaptchaRequired(w)
 			return
 		}
 		if writer == nil {
@@ -517,7 +632,15 @@ func main() {
 			http.Error(w, "invalid bomb target", http.StatusBadRequest)
 			return
 		}
-		identity := strconv.FormatInt(telegramUser.ID, 10)
+		now := time.Now().UTC()
+		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
+		if userCooldown > 0 {
+			if allowed, retryAfter := cooldown.Allow(identity, "main", userCooldown, now); !allowed {
+				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
+				http.Error(w, "placement cooldown", http.StatusTooManyRequests)
+				return
+			}
+		}
 		inventory, consumed, err := writer.ConsumeBomb(r.Context(), identity)
 		if err != nil {
 			http.Error(w, "inventory unavailable", http.StatusServiceUnavailable)
@@ -529,7 +652,6 @@ func main() {
 			return
 		}
 		author := profileFromTelegram(telegramUser)
-		now := time.Now().UTC()
 		colors := bombPalette(request.Color)
 		events := make([]domain.PixelEvent, 0, 21)
 		for dy := -2; dy <= 2; dy++ {
@@ -563,12 +685,14 @@ func main() {
 				return
 			}
 			boardStore.Apply(event)
+			recorder.Record(event)
 			payload, _ := json.Marshal(eventForClient(event))
 			hub.Broadcast(payload)
 		}
-		trophyAward := awardDueTrophy(r.Context(), identity, author)
+		captchaGuard.RecordPlacement(identity, now, userCooldown)
+		awardDueTrophy(r.Context(), identity, author)
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory, "trophyAward": trophyAward})
+		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory})
 	})
 	statsHandler := func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -870,6 +994,124 @@ func main() {
 		peak := accessStore.RecordOnlinePeak(r.Context(), current)
 		writeJSON(w, map[string]int64{"currentOnline": current, "peakOnline": peak})
 	})
+	http.HandleFunc("/api/admin/recording", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		writeJSON(w, recorder.Status())
+	})
+	http.HandleFunc("/api/admin/recording/start", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		boardMu.Lock()
+		err := recorder.Start(int(boardWidth.Load()), int(boardHeight.Load()), boardStore.Snapshot("main"))
+		boardMu.Unlock()
+		if err != nil {
+			http.Error(w, "recording is already active", http.StatusConflict)
+			return
+		}
+		writeJSON(w, recorder.Status())
+	})
+	http.HandleFunc("/api/admin/recording/stop", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		video, err := recorder.Stop(r.Context())
+		if err != nil {
+			if strings.Contains(err.Error(), "not active") {
+				http.Error(w, "recording is not active", http.StatusConflict)
+				return
+			}
+			log.Printf("recording export failed: %v", err)
+			http.Error(w, "failed to export recording", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Disposition", `attachment; filename="pixelbattle-recording.mp4"`)
+		w.Header().Set("Content-Length", strconv.Itoa(len(video)))
+		_, _ = w.Write(video)
+	})
+	http.HandleFunc("/api/admin/captcha/statuses", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		writeJSON(w, map[string]any{"players": captchaGuard.ReviewStatuses(time.Now().UTC())})
+	})
+	http.HandleFunc("/api/admin/trophy-reward-requests", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "requests unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		requests, err := writer.PendingTrophyRewardRequests(r.Context())
+		if err != nil {
+			http.Error(w, "requests unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]any{"requests": requests})
+	})
+	http.HandleFunc("/api/admin/trophy-reward-requests/ack", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "requests unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var request struct {
+			RequestID int64 `json:"requestId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.RequestID <= 0 {
+			http.Error(w, "invalid requestId", http.StatusBadRequest)
+			return
+		}
+		_, err := writer.MarkTrophyRewardRequestNotified(r.Context(), request.RequestID)
+		if err != nil {
+			http.Error(w, "requests unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	})
+	http.HandleFunc("/api/admin/captcha/require", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			UserID string `json:"userId"`
+		}
+		if decodeErr := json.NewDecoder(r.Body).Decode(&request); decodeErr != nil {
+			http.Error(w, "invalid captcha request", http.StatusBadRequest)
+			return
+		}
+		userID, err := strconv.ParseInt(request.UserID, 10, 64)
+		if err != nil || userID <= 0 {
+			http.Error(w, "invalid userId", http.StatusBadRequest)
+			return
+		}
+		identity := strconv.FormatInt(userID, 10)
+		if !captchaGuard.Force(identity, time.Now().UTC()) {
+			http.Error(w, "captcha state unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		log.Printf("captcha required by admin: user=%s", identity)
+		payload, _ := json.Marshal(map[string]any{"type": "captcha_required"})
+		hub.SendToUser(identity, payload)
+		writeJSON(w, map[string]any{"required": true, "userId": identity})
+	})
 	http.HandleFunc("/api/admin/quests/reset", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
@@ -932,6 +1174,31 @@ func main() {
 			return
 		}
 		writeJSON(w, map[string]any{"granted": true, "userId": request.UserID, "item": request.Item, "amount": request.Amount, "inventory": inventory})
+	})
+	http.HandleFunc("/api/admin/reset-all", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost || writer == nil {
+			http.Error(w, "reset unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		boardMu.Lock()
+		err := writer.ResetAllProgress(r.Context())
+		if err == nil {
+			boardStore.Clear("main")
+			version.Store(0)
+			err = writer.WriteSnapshot(r.Context(), "main", nil, 0, persistence.BoardSize{Width: int(boardWidth.Load()), Height: int(boardHeight.Load())})
+		}
+		boardMu.Unlock()
+		if err != nil {
+			log.Printf("full progress reset failed: %v", err)
+			http.Error(w, "failed to reset progress", http.StatusInternalServerError)
+			return
+		}
+		hub.Broadcast([]byte(`{"type":"board_reload"}`))
+		writeJSON(w, map[string]any{"reset": true, "boardCleared": true})
 	})
 	http.HandleFunc("/api/admin/trophies/drop", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
@@ -1143,6 +1410,10 @@ func main() {
 					_ = client.SendJSON(map[string]any{"type": "error", "code": "game_paused", "message": "Game is paused"})
 					return
 				}
+				if captchaGuard.Required(identity, time.Now().UTC()) {
+					_ = client.SendJSON(map[string]any{"type": "captcha_required"})
+					return
+				}
 				if !operationIDPattern.MatchString(request.OperationID) || request.Type != "place_pixel" || request.BoardID != "main" || request.X < 0 || request.Y < 0 || request.X >= int(boardWidth.Load()) || request.Y >= int(boardHeight.Load()) || !colorPattern.MatchString(request.Color) {
 					_ = client.SendJSON(map[string]any{"type": "error", "code": "invalid_placement", "message": "Invalid pixel placement"})
 					return
@@ -1156,7 +1427,8 @@ func main() {
 					}
 					existingFreeze = current.FrozenUntil
 				}
-				if userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown); userCooldown > 0 {
+				userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
+				if userCooldown > 0 {
 					if allowed, retryAfter := cooldown.Allow(identity, request.BoardID, userCooldown, time.Now()); !allowed {
 						_ = client.SendJSON(map[string]any{"type": "error", "code": "placement_cooldown", "message": fmt.Sprintf("Place one pixel every %s", userCooldown), "retryAfterMs": retryAfter.Milliseconds()})
 						return
@@ -1185,12 +1457,20 @@ func main() {
 					return
 				}
 				boardStore.Apply(event)
+				recorder.Record(event)
+				captchaRequired := captchaGuard.RecordPlacement(identity, now, userCooldown)
+				if captchaRequired {
+					log.Printf("captcha required after suspicious placement timing: user=%s", identity)
+				}
 				awardDueTrophy(r.Context(), identity, author)
 				if freezeChargeUsed && writer != nil {
 					_ = checkpoint(r.Context())
 				}
 				payload, _ := json.Marshal(eventForClient(event))
 				hub.Broadcast(payload)
+				if captchaRequired {
+					_ = client.SendJSON(map[string]any{"type": "captcha_required"})
+				}
 			}()
 		}
 	})
@@ -1456,22 +1736,51 @@ type publicBoardPixel struct {
 	FrozenUntil *time.Time        `json:"frozenUntil,omitempty"`
 }
 type publicPixelEvent struct {
-	Type        string            `json:"type"`
-	X           int               `json:"x"`
-	Y           int               `json:"y"`
-	Color       string            `json:"color"`
-	Version     int64             `json:"version"`
-	Author      publicPixelAuthor `json:"author"`
-	FrozenUntil *time.Time        `json:"frozenUntil,omitempty"`
-	TrophyAward *trophyAwardEvent `json:"trophyAward,omitempty"`
+	Type            string            `json:"type"`
+	X               int               `json:"x"`
+	Y               int               `json:"y"`
+	Color           string            `json:"color"`
+	Version         int64             `json:"version"`
+	Author          publicPixelAuthor `json:"author"`
+	FrozenUntil     *time.Time        `json:"frozenUntil,omitempty"`
+	CaptchaRequired bool              `json:"captchaRequired,omitempty"`
 }
 
 type trophyAwardEvent struct {
-	Type      string `json:"type"`
-	EventID   string `json:"eventId"`
-	UserID    string `json:"userId"`
-	Nickname  string `json:"nickname"`
-	Completed bool   `json:"completed,omitempty"`
+	Nickname string `json:"nickname"`
+	Text     string `json:"text"`
+}
+
+func trophyRewardRequestSource(trophyID string) string {
+	switch trophyID {
+	case "bear":
+		return "Идейный Аниматор"
+	case "bear-redjex":
+		return "redjex"
+	case "liberty-figure-252202", "candy-cane-162605", "vice-cream-227533", "vice-cream-428029", "chill-flame-303522":
+		return "NFT"
+	default:
+		return ""
+	}
+}
+
+func trophyRewardName(trophyID string) string {
+	for _, definition := range trophyDefinitionsForRequests {
+		if definition.ID == trophyID {
+			return definition.Name
+		}
+	}
+	return trophyID
+}
+
+var trophyDefinitionsForRequests = []struct{ ID, Name string }{
+	{"bear", "Мишка"},
+	{"bear-redjex", "Мишка redjex"},
+	{"liberty-figure-252202", "LibertyFigure #252202"},
+	{"candy-cane-162605", "CandyCane #162605"},
+	{"vice-cream-227533", "ViceCream #227533"},
+	{"vice-cream-428029", "ViceCream #428029"},
+	{"chill-flame-303522", "ChillFlame #303522"},
 }
 
 func publicSnapshot(pixels []domain.BoardPixel) []publicBoardPixel {
@@ -1487,6 +1796,13 @@ func eventForClient(event domain.PixelEvent) publicPixelEvent {
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeCaptchaRequired(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusLocked)
+	_ = json.NewEncoder(w).Encode(map[string]any{"code": "captcha_required", "captchaRequired": true})
 }
 
 func snapshotLoop(ctx context.Context, mu *sync.Mutex, checkpoint func(context.Context) error) {
