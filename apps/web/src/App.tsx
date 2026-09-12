@@ -3,6 +3,7 @@ import { BattleScreen } from './components/BattleScreen';
 import { LoadingScreen } from './components/LoadingScreen';
 import { MainMenu } from './components/MainMenu';
 import { StatisticsScreen } from './components/StatisticsScreen';
+import { SettingsScreen } from './components/SettingsScreen';
 import { AgreementScreen } from './components/AgreementScreen';
 import { authenticateTelegram, fetchAppAccess, getTelegramWebApp, TelegramAuthenticationError, type AppAccess } from './telegram';
 import { preloadBoardSnapshot } from './boardSnapshot';
@@ -16,7 +17,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [authState, setAuthState] = useState<'checking' | 'denied' | 'invalid' | 'authorized'>('checking');
   const [appAccess, setAppAccess] = useState<AppAccess | null>(null);
-  const [screen, setScreen] = useState<'menu' | 'map' | 'stats' | 'rating' | 'agreement' | 'gifts' | 'gifts-catalog'>('menu');
+  const [screen, setScreen] = useState<'menu' | 'map' | 'stats' | 'rating' | 'agreement' | 'settings' | 'gifts' | 'gifts-catalog'>('menu');
   const maintenanceMode = appAccess?.accessAllowed === false;
 
   useEffect(() => {
@@ -80,7 +81,7 @@ export function App() {
       backButton.hide();
       return;
     }
-    const handleBack = () => setScreen(screen === 'agreement' || screen === 'rating' ? 'stats' : screen === 'gifts-catalog' ? 'gifts' : 'menu');
+    const handleBack = () => setScreen(screen === 'agreement' || screen === 'rating' || screen === 'settings' ? 'stats' : screen === 'gifts-catalog' ? 'gifts' : 'menu');
     backButton.onClick(handleBack);
     backButton.show();
     return () => {
@@ -152,16 +153,9 @@ export function App() {
       }).catch(() => undefined);
     };
     const timer = window.setInterval(syncAccess, 2500);
-    const handleTrophyAwarded = (event: Event) => {
-      const winnerID = (event as CustomEvent<{ userId?: string }>).detail?.userId;
-      const currentUserID = getTelegramWebApp()?.initDataUnsafe?.user?.id;
-      if (winnerID === String(currentUserID ?? '')) syncAccess();
-    };
-    window.addEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
     return () => {
       active = false;
       window.clearInterval(timer);
-      window.removeEventListener('pixelbattle:trophy-awarded', handleTrophyAwarded);
     };
   }, [authState]);
 
@@ -201,11 +195,21 @@ export function App() {
     };
   }, [appAccess?.accessAllowed, authState]);
 
+  const handleItemRewardClaimed = (rewardId: number) => {
+    setAppAccess((current) => current ? {
+      ...current,
+      pendingItemRewards: current.pendingItemRewards.filter((reward) => reward.rewardId !== rewardId),
+    } : current);
+    const initData = getTelegramWebApp()?.initData;
+    if (!initData) return;
+    void fetchAppAccess(initData).then(setAppAccess).catch(() => undefined);
+  };
+
   if (authState !== 'authorized') return <main className="app-shell"><section className="phone-frame"><LoadingScreen message={authState === 'invalid' ? 'Ошибка проверки Telegram' : 'Откройте через Telegram'} /></section></main>;
   return <main className="app-shell"><section className="phone-frame" aria-label="Pixel Battle">
     {loading ? <LoadingScreen /> : <>
       <MainMenu active={maintenanceMode || screen === 'menu'} maintenance={maintenanceMode} onOpenMap={() => { if (!maintenanceMode) setScreen('map'); }} onOpenStats={() => { if (!maintenanceMode) setScreen('stats'); }} onOpenGifts={() => { if (!maintenanceMode) setScreen('gifts'); }} />
-      {!maintenanceMode && screen !== 'menu' && (screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} onOpenCatalog={() => setScreen('gifts-catalog')} onBack={() => setScreen('menu')} /> : screen === 'gifts-catalog' ? <GiftsCatalogScreen prizes={appAccess?.prizes ?? []} soldOutTrophies={appAccess?.soldOutTrophies ?? []} onBack={() => setScreen('gifts')} /> : <BattleScreen online={appAccess?.online ?? null} />)}
+      {!maintenanceMode && screen !== 'menu' && (screen === 'stats' ? <StatisticsScreen onBack={() => setScreen('menu')} onOpenRating={() => setScreen('rating')} onOpenAgreement={() => setScreen('agreement')} onOpenSettings={() => setScreen('settings')} /> : screen === 'rating' ? <RatingScreen onBack={() => setScreen('stats')} /> : screen === 'agreement' ? <AgreementScreen onBack={() => setScreen('stats')} /> : screen === 'settings' ? <SettingsScreen onBack={() => setScreen('stats')} /> : screen === 'gifts' ? <GiftsScreen prizes={appAccess?.prizes ?? []} pendingItemRewards={appAccess?.pendingItemRewards ?? []} onItemRewardClaimed={handleItemRewardClaimed} onOpenCatalog={() => setScreen('gifts-catalog')} onBack={() => setScreen('menu')} /> : screen === 'gifts-catalog' ? <GiftsCatalogScreen prizes={appAccess?.prizes ?? []} soldOutTrophies={appAccess?.soldOutTrophies ?? []} onBack={() => setScreen('gifts')} /> : <BattleScreen online={appAccess?.online ?? null} />)}
     </>}
     {!loading && !maintenanceMode && <QuestNotifications active={screen === 'map'} />}
   </section></main>;

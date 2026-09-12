@@ -2,10 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { usePixelSocket } from '../hooks/usePixelSocket';
 import type { Pixel } from '../types/pixel';
 import { loadBoardSnapshot } from '../boardSnapshot';
+import type { TemplatePlacement } from '../templateStorage';
 
 const DEFAULT_BOARD_SIZE = 150;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 100;
+const ZOOM_SPEED_MULTIPLIER = 1.2;
 const TEMPLATE_COLORS = [
   '#FF8080', '#FFCA73', '#FBFFA5', '#7CFF80', '#7EFFF2', '#84D0FF', '#8290FF', '#CD81FF', '#FF80D0', '#FDFDFD',
   '#FF0000', '#FF9D00', '#F2FF00', '#00FF07', '#00FFE6', '#009DFF', '#001EFF', '#9900FF', '#FF00A1', '#8A8A8A',
@@ -17,7 +19,7 @@ const normalizeBoardColor = (color: string) => color.toUpperCase() === '#F8F9FA'
 
 type TemplateState = { image: HTMLImageElement; canvas: HTMLCanvasElement; x: number; y: number; width: number; height: number };
 type TemplateGesture = { mode: 'move' | 'resize'; pointerId: number; startClientX: number; startClientY: number; startX: number; startY: number; startWidth: number; startHeight: number };
-type Props = { color: string; zoom: number; onZoom: (zoom: number) => void; eyedropper: boolean; onPickColor: (color: string) => void; onEyedropperEnd: () => void; paintNonce: number; useIce: boolean; onSelectPixel: (pixel: { x: number; y: number } | null) => void; onInspectPixel: (pixel: Pixel | null) => void; cooldownUntil: number; onPlacementAccepted: () => void; templateImageUrl: string | null };
+type Props = { color: string; zoom: number; onZoom: (zoom: number) => void; eyedropper: boolean; onPickColor: (color: string) => void; onEyedropperEnd: () => void; paintNonce: number; useIce: boolean; onSelectPixel: (pixel: { x: number; y: number } | null) => void; onInspectPixel: (pixel: Pixel | null) => void; cooldownUntil: number; onPlacementAccepted: () => void; templateImageUrl: string | null; templatePlacement: TemplatePlacement | null; onTemplatePlacementChange: (placement: TemplatePlacement) => void };
 
 function renderTemplate(image: HTMLImageElement, width: number, height: number) {
   const canvas = document.createElement('canvas');
@@ -55,7 +57,7 @@ function renderTemplate(image: HTMLImageElement, width: number, height: number) 
   return canvas;
 }
 
-export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEyedropperEnd, paintNonce, useIce, onSelectPixel, onInspectPixel, cooldownUntil, onPlacementAccepted, templateImageUrl }: Props) {
+export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEyedropperEnd, paintNonce, useIce, onSelectPixel, onInspectPixel, cooldownUntil, onPlacementAccepted, templateImageUrl, templatePlacement, onTemplatePlacementChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const checkerPatternRef = useRef<CanvasPattern | null>(null);
   const boardLayerRef = useRef<HTMLCanvasElement | null>(null);
@@ -63,6 +65,8 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   const pixelsRef = useRef(new Map<string, Pixel>());
   const boardReadyRef = useRef(false);
   const templateRef = useRef<TemplateState | null>(null);
+  const templatePlacementRef = useRef(templatePlacement);
+  templatePlacementRef.current = templatePlacement;
   const templateGestureRef = useRef<TemplateGesture | null>(null);
   const templateMoveIconRef = useRef<HTMLImageElement | null>(null);
   const templateResizeIconRef = useRef<HTMLImageElement | null>(null);
@@ -77,6 +81,11 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   const targetZoomRef = useRef(zoom);
   const wheelAnimationRef = useRef<number | null>(null);
   const viewFrameRef = useRef<number | null>(null);
+  const drawRef = useRef<() => void>(() => undefined);
+  const canvasPixelRatioRef = useRef(Math.min(
+    window.devicePixelRatio || 1,
+    window.matchMedia('(pointer: coarse)').matches ? 1.5 : 2,
+  ));
   const wheelAnchorRef = useRef<{ x: number; y: number; boardX: number; boardY: number } | null>(null);
   const skipZoomReanchorRef = useRef(false);
   const longPressTimerRef = useRef<number | null>(null);
@@ -87,10 +96,22 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
 
   const acceptPixel = useCallback((pixel: Pixel) => {
     pixelsRef.current.set(`${pixel.x}:${pixel.y}`, pixel);
-    boardLayerDirtyRef.current = true;
+    const boardLayer = boardLayerRef.current;
+    const boardSize = boardSizeRef.current;
+    if (boardLayer && boardLayer.width === boardSize.width && boardLayer.height === boardSize.height && !boardLayerDirtyRef.current) {
+      const boardContext = boardLayer.getContext('2d');
+      if (boardContext) {
+        boardContext.fillStyle = normalizeBoardColor(pixel.color);
+        boardContext.fillRect(pixel.x, pixel.y, 1, 1);
+      } else {
+        boardLayerDirtyRef.current = true;
+      }
+    } else {
+      boardLayerDirtyRef.current = true;
+    }
     const selected = selectedRef.current;
     if (selected?.x === pixel.x && selected.y === pixel.y) onInspectPixel(pixel);
-    setRevision((value) => value + 1);
+    scheduleViewRender();
   }, [onInspectPixel]);
   const reloadBoard = useCallback(() => setBoardReloadNonce((value) => value + 1), []);
   const { place } = usePixelSocket(acceptPixel, reloadBoard);
@@ -185,15 +206,21 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       const scale = Math.min(1, boardDimensions.width / image.naturalWidth, boardDimensions.height / image.naturalHeight);
       const width = Math.max(1, Math.floor(image.naturalWidth * scale));
       const height = Math.max(1, Math.floor(image.naturalHeight * scale));
-      const canvas = renderTemplate(image, width, height);
+      const saved = templatePlacementRef.current;
+      const savedWidth = saved && Number.isFinite(saved.width) ? Math.max(1, Math.min(boardDimensions.width, Math.round(saved.width))) : width;
+      const savedHeight = saved && Number.isFinite(saved.height) ? Math.max(1, Math.min(boardDimensions.height, Math.round(saved.height))) : height;
+      const x = saved && Number.isFinite(saved.x) ? Math.max(0, Math.min(boardDimensions.width - savedWidth, Math.round(saved.x))) : Math.floor((boardDimensions.width - savedWidth) / 2);
+      const y = saved && Number.isFinite(saved.y) ? Math.max(0, Math.min(boardDimensions.height - savedHeight, Math.round(saved.y))) : Math.floor((boardDimensions.height - savedHeight) / 2);
+      const canvas = renderTemplate(image, savedWidth, savedHeight);
       templateRef.current = {
         image,
         canvas,
-        width,
-        height,
-        x: Math.floor((boardDimensions.width - width) / 2),
-        y: Math.floor((boardDimensions.height - height) / 2),
+        width: savedWidth,
+        height: savedHeight,
+        x,
+        y,
       };
+      onTemplatePlacementChange({ x, y, width: savedWidth, height: savedHeight });
       setRevision((value) => value + 1);
     };
     image.src = templateImageUrl;
@@ -222,7 +249,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       const context = canvas.getContext('2d');
       if (!context) return;
       const rect = canvas.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
+      const ratio = canvasPixelRatioRef.current;
       const physicalWidth = Math.round(rect.width * ratio);
       const physicalHeight = Math.round(rect.height * ratio);
       if (canvas.width !== physicalWidth || canvas.height !== physicalHeight) {
@@ -279,36 +306,56 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
           boardLayerDirtyRef.current = false;
         }
       }
-      context.imageSmoothingEnabled = false;
-      context.drawImage(boardLayer, originX, originY, boardWidth, boardHeight);
+      const visibleLeft = Math.max(0, Math.floor(-originX / cell));
+      const visibleTop = Math.max(0, Math.floor(-originY / cell));
+      const visibleRight = Math.min(width, Math.ceil((rect.width - originX) / cell));
+      const visibleBottom = Math.min(height, Math.ceil((rect.height - originY) / cell));
+      const visibleWidth = visibleRight - visibleLeft;
+      const visibleHeight = visibleBottom - visibleTop;
+      if (visibleWidth > 0 && visibleHeight > 0) {
+        context.imageSmoothingEnabled = false;
+        context.drawImage(
+          boardLayer,
+          visibleLeft,
+          visibleTop,
+          visibleWidth,
+          visibleHeight,
+          originX + visibleLeft * cell,
+          originY + visibleTop * cell,
+          visibleWidth * cell,
+          visibleHeight * cell,
+        );
+      }
       context.save();
       context.strokeStyle = '#111111';
       context.lineWidth = 3;
       context.lineCap = 'round';
-      context.lineJoin = 'miter';
+      context.setLineDash([8, 7]);
+      context.lineDashOffset = -3.5;
       const borderX = originX + 1.5;
       const borderY = originY + 1.5;
       const borderWidth = Math.max(0, boardWidth - 3);
       const borderHeight = Math.max(0, boardHeight - 3);
-      const drawPillEdge = (startX: number, startY: number, endX: number, endY: number) => {
-        const length = Math.hypot(endX - startX, endY - startY);
-        if (length <= 0) return;
-        const unitX = (endX - startX) / length;
-        const unitY = (endY - startY) / length;
-        const dashLength = 8;
-        const gapLength = 7;
-        for (let offset = gapLength / 2; offset < length - gapLength / 2; offset += dashLength + gapLength) {
-          const dashEnd = Math.min(offset + dashLength, length - gapLength / 2);
-          context.beginPath();
-          context.moveTo(startX + unitX * offset, startY + unitY * offset);
-          context.lineTo(startX + unitX * dashEnd, startY + unitY * dashEnd);
-          context.stroke();
-        }
-      };
-      drawPillEdge(borderX, borderY, borderX + borderWidth, borderY);
-      drawPillEdge(borderX + borderWidth, borderY, borderX + borderWidth, borderY + borderHeight);
-      drawPillEdge(borderX + borderWidth, borderY + borderHeight, borderX, borderY + borderHeight);
-      drawPillEdge(borderX, borderY + borderHeight, borderX, borderY);
+      context.beginPath();
+      const horizontalBorderVisible = borderX <= rect.width + 3 && borderX + borderWidth >= -3;
+      const verticalBorderVisible = borderY <= rect.height + 3 && borderY + borderHeight >= -3;
+      if (horizontalBorderVisible && borderY >= -3 && borderY <= rect.height + 3) {
+        context.moveTo(Math.max(-3, borderX), borderY);
+        context.lineTo(Math.min(rect.width + 3, borderX + borderWidth), borderY);
+      }
+      if (horizontalBorderVisible && borderY + borderHeight >= -3 && borderY + borderHeight <= rect.height + 3) {
+        context.moveTo(Math.max(-3, borderX), borderY + borderHeight);
+        context.lineTo(Math.min(rect.width + 3, borderX + borderWidth), borderY + borderHeight);
+      }
+      if (verticalBorderVisible && borderX >= -3 && borderX <= rect.width + 3) {
+        context.moveTo(borderX, Math.max(-3, borderY));
+        context.lineTo(borderX, Math.min(rect.height + 3, borderY + borderHeight));
+      }
+      if (verticalBorderVisible && borderX + borderWidth >= -3 && borderX + borderWidth <= rect.width + 3) {
+        context.moveTo(borderX + borderWidth, Math.max(-3, borderY));
+        context.lineTo(borderX + borderWidth, Math.min(rect.height + 3, borderY + borderHeight));
+      }
+      context.stroke();
       context.restore();
       const template = templateRef.current;
       if (template) {
@@ -316,11 +363,29 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
         const templateTop = originY + template.y * cell;
         const templateRight = templateLeft + template.width * cell;
         const templateBottom = templateTop + template.height * cell;
-        context.save();
-        context.globalAlpha = 0.46;
-        context.imageSmoothingEnabled = false;
-        context.drawImage(template.canvas, templateLeft, templateTop, template.width * cell, template.height * cell);
-        context.restore();
+        const templateVisibleLeft = Math.max(0, Math.floor(-templateLeft / cell));
+        const templateVisibleTop = Math.max(0, Math.floor(-templateTop / cell));
+        const templateVisibleRight = Math.min(template.width, Math.ceil((rect.width - templateLeft) / cell));
+        const templateVisibleBottom = Math.min(template.height, Math.ceil((rect.height - templateTop) / cell));
+        const templateVisibleWidth = templateVisibleRight - templateVisibleLeft;
+        const templateVisibleHeight = templateVisibleBottom - templateVisibleTop;
+        if (templateVisibleWidth > 0 && templateVisibleHeight > 0) {
+          context.save();
+          context.globalAlpha = 0.46;
+          context.imageSmoothingEnabled = false;
+          context.drawImage(
+            template.canvas,
+            templateVisibleLeft,
+            templateVisibleTop,
+            templateVisibleWidth,
+            templateVisibleHeight,
+            templateLeft + templateVisibleLeft * cell,
+            templateTop + templateVisibleTop * cell,
+            templateVisibleWidth * cell,
+            templateVisibleHeight * cell,
+          );
+          context.restore();
+        }
 
         const drawTemplateHandle = (centerX: number, centerY: number, kind: 'move' | 'resize') => {
           context.save();
@@ -376,6 +441,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       }
     };
 
+    drawRef.current = draw;
     draw();
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
@@ -404,7 +470,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     if (viewFrameRef.current !== null) return;
     viewFrameRef.current = window.requestAnimationFrame(() => {
       viewFrameRef.current = null;
-      setRevision((value) => value + 1);
+      drawRef.current();
     });
   }
 
@@ -531,7 +597,6 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
           template.y = templateGesture.startY;
           template.width = nextWidth;
           template.height = nextHeight;
-          template.canvas = renderTemplate(template.image, nextWidth, nextHeight);
           scheduleViewRender();
         }
       }
@@ -558,11 +623,13 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
           activePinch.smoothedDistance += (rawDistance - activePinch.smoothedDistance) * 0.32;
           activePinch.center.x += (rawCenter.x - activePinch.center.x) * 0.28;
           activePinch.center.y += (rawCenter.y - activePinch.center.y) * 0.28;
-          const desiredZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, activePinch.zoom * activePinch.smoothedDistance / Math.max(1, activePinch.distance)));
+          const distanceRatio = activePinch.smoothedDistance / Math.max(1, activePinch.distance);
+          const desiredZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, activePinch.zoom * Math.pow(distanceRatio, ZOOM_SPEED_MULTIPLIER)));
           const currentZoom = renderedZoomRef.current;
           const difference = desiredZoom - currentZoom;
-          const unrestrictedZoom = currentZoom + difference * 0.28;
-          const nextZoom = Math.min(currentZoom * 1.06, Math.max(currentZoom / 1.06, unrestrictedZoom));
+          const unrestrictedZoom = currentZoom + difference * (0.28 * ZOOM_SPEED_MULTIPLIER);
+          const frameFactor = 1 + 0.06 * ZOOM_SPEED_MULTIPLIER;
+          const nextZoom = Math.min(currentZoom * frameFactor, Math.max(currentZoom / frameFactor, unrestrictedZoom));
           const nextOriginX = activePinch.center.x - activePinch.boardPoint.x * nextZoom;
           const nextOriginY = activePinch.center.y - activePinch.boardPoint.y * nextZoom;
           const { width, height } = boardSizeRef.current;
@@ -571,7 +638,6 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
           renderedZoomRef.current = nextZoom;
           targetZoomRef.current = nextZoom;
           skipZoomReanchorRef.current = true;
-          onZoom(nextZoom);
           scheduleViewRender();
         });
       }
@@ -595,8 +661,15 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   }
 
   function handlePointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (templateGestureRef.current?.pointerId === event.pointerId) {
+    const templateGesture = templateGestureRef.current;
+    if (templateGesture?.pointerId === event.pointerId) {
       templateGestureRef.current = null;
+      const template = templateRef.current;
+      if (template) {
+        if (templateGesture.mode === 'resize') template.canvas = renderTemplate(template.image, template.width, template.height);
+        onTemplatePlacementChange({ x: template.x, y: template.y, width: template.width, height: template.height });
+        scheduleViewRender();
+      }
       return;
     }
     pointersRef.current.delete(event.pointerId);
@@ -609,6 +682,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     if (pinchRef.current) {
       pinchRef.current = null;
       dragRef.current = null;
+      onZoom(renderedZoomRef.current);
       return;
     }
     const drag = dragRef.current;
@@ -645,7 +719,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       boardY: (anchorY - currentOriginY) / currentZoom,
     };
     const normalizedDelta = Math.max(-120, Math.min(120, event.deltaY));
-    const factor = Math.exp(-normalizedDelta * 0.0015);
+    const factor = Math.exp(-normalizedDelta * 0.0015 * ZOOM_SPEED_MULTIPLIER);
     targetZoomRef.current = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, targetZoomRef.current * factor));
     if (wheelAnimationRef.current !== null) return;
 
@@ -657,7 +731,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       const target = targetZoomRef.current;
       const difference = target - current;
       const threshold = Math.max(0.002, target * 0.001);
-      const next = Math.abs(difference) < threshold ? target : current + difference * 0.18;
+      const next = Math.abs(difference) < threshold ? target : current + difference * (0.18 * ZOOM_SPEED_MULTIPLIER);
       const canvasRect = canvas.getBoundingClientRect();
       const boardSize = boardSizeRef.current;
       const nextOriginX = anchor.x - anchor.boardX * next;
@@ -666,9 +740,10 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       panRef.current.y = nextOriginY - (canvasRect.height / 2 - (boardSize.height * next) / 2);
       renderedZoomRef.current = next;
       skipZoomReanchorRef.current = true;
-      onZoom(next);
+      scheduleViewRender();
       if (next === target) {
         wheelAnimationRef.current = null;
+        onZoom(next);
         return;
       }
       wheelAnimationRef.current = window.requestAnimationFrame(animateZoom);

@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -34,6 +35,19 @@ type Inventory struct {
 	Experience      int64 `json:"experience"`
 	FreezeRemaining int64 `json:"freezeRemaining"`
 }
+
+type TrophyItemReward struct {
+	RewardID  int64     `json:"rewardId"`
+	TrophyID  string    `json:"trophyId"`
+	Item      string    `json:"item"`
+	Amount    int64     `json:"amount"`
+	AwardedAt time.Time `json:"awardedAt"`
+}
+
+var (
+	ErrTrophyItemRewardNotFound = errors.New("trophy item reward not found")
+	ErrTrophyItemRewardClaimed  = errors.New("trophy item reward already claimed")
+)
 
 type BoardSize struct {
 	Width  int
@@ -195,10 +209,21 @@ CREATE TABLE IF NOT EXISTS trophy_reward_claims (
  claim_id bigserial PRIMARY KEY,
  trophy_id text NOT NULL,
  user_id text NOT NULL,
+ item text,
  amount bigint NOT NULL CHECK (amount > 0),
- claimed_at timestamptz NOT NULL DEFAULT NOW()
+ awarded_at timestamptz NOT NULL DEFAULT NOW(),
+ claimed_at timestamptz
 );
+ALTER TABLE trophy_reward_claims ADD COLUMN IF NOT EXISTS item text;
+ALTER TABLE trophy_reward_claims ADD COLUMN IF NOT EXISTS awarded_at timestamptz NOT NULL DEFAULT NOW();
+ALTER TABLE trophy_reward_claims ALTER COLUMN claimed_at DROP NOT NULL;
+ALTER TABLE trophy_reward_claims ALTER COLUMN claimed_at DROP DEFAULT;
+UPDATE trophy_reward_claims SET item=CASE trophy_id WHEN 'bomb' THEN 'bomb' WHEN 'ice' THEN 'ice' ELSE 'experience' END WHERE item IS NULL;
+ALTER TABLE trophy_reward_claims ALTER COLUMN item SET NOT NULL;
+ALTER TABLE trophy_reward_claims DROP CONSTRAINT IF EXISTS trophy_reward_claims_item_check;
+ALTER TABLE trophy_reward_claims ADD CONSTRAINT trophy_reward_claims_item_check CHECK (item IN ('bomb','ice','experience'));
 CREATE INDEX IF NOT EXISTS trophy_reward_claims_trophy_id_idx ON trophy_reward_claims(trophy_id);
+CREATE INDEX IF NOT EXISTS trophy_reward_claims_pending_user_idx ON trophy_reward_claims(user_id,claim_id) WHERE claimed_at IS NULL;
 CREATE TABLE IF NOT EXISTS trophy_winners (
  trophy_id text NOT NULL,
  user_id text NOT NULL,
@@ -258,6 +283,69 @@ func (w *Writer) Inventory(ctx context.Context, userID string) (Inventory, error
 	err := w.pool.QueryRow(ctx, `SELECT bombs,ice,experience,freeze_remaining FROM player_items WHERE user_id=$1`, userID).
 		Scan(&inventory.Bombs, &inventory.Ice, &inventory.Experience, &inventory.FreezeRemaining)
 	return inventory, err
+}
+
+func (w *Writer) PendingTrophyItemRewards(ctx context.Context, userID string) ([]TrophyItemReward, error) {
+	rows, err := w.pool.Query(ctx, `SELECT claim_id,trophy_id,item,amount,awarded_at FROM trophy_reward_claims WHERE user_id=$1 AND claimed_at IS NULL ORDER BY claim_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	rewards := make([]TrophyItemReward, 0)
+	for rows.Next() {
+		var reward TrophyItemReward
+		if err := rows.Scan(&reward.RewardID, &reward.TrophyID, &reward.Item, &reward.Amount, &reward.AwardedAt); err != nil {
+			return nil, err
+		}
+		rewards = append(rewards, reward)
+	}
+	return rewards, rows.Err()
+}
+
+func (w *Writer) ClaimTrophyItemReward(ctx context.Context, userID string, rewardID int64) (TrophyItemReward, Inventory, error) {
+	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return TrophyItemReward{}, Inventory{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var reward TrophyItemReward
+	var alreadyClaimed bool
+	err = tx.QueryRow(ctx, `SELECT claim_id,trophy_id,item,amount,awarded_at,claimed_at IS NOT NULL FROM trophy_reward_claims WHERE claim_id=$1 AND user_id=$2 FOR UPDATE`, rewardID, userID).
+		Scan(&reward.RewardID, &reward.TrophyID, &reward.Item, &reward.Amount, &reward.AwardedAt, &alreadyClaimed)
+	if err == pgx.ErrNoRows {
+		return TrophyItemReward{}, Inventory{}, ErrTrophyItemRewardNotFound
+	}
+	if err != nil {
+		return TrophyItemReward{}, Inventory{}, err
+	}
+	if alreadyClaimed {
+		return TrophyItemReward{}, Inventory{}, ErrTrophyItemRewardClaimed
+	}
+	column := ""
+	switch reward.Item {
+	case "bomb":
+		column = "bombs"
+	case "ice":
+		column = "ice"
+	case "experience":
+		column = "experience"
+	default:
+		return TrophyItemReward{}, Inventory{}, fmt.Errorf("unknown trophy reward item %q", reward.Item)
+	}
+	query := fmt.Sprintf(`INSERT INTO player_items(user_id,%s,updated_at) VALUES($1,$2,NOW())
+ON CONFLICT(user_id) DO UPDATE SET %s=player_items.%s+EXCLUDED.%s,updated_at=NOW()
+RETURNING bombs,ice,experience,freeze_remaining`, column, column, column, column)
+	var inventory Inventory
+	if err := tx.QueryRow(ctx, query, userID, reward.Amount).Scan(&inventory.Bombs, &inventory.Ice, &inventory.Experience, &inventory.FreezeRemaining); err != nil {
+		return TrophyItemReward{}, Inventory{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE trophy_reward_claims SET claimed_at=NOW() WHERE claim_id=$1`, rewardID); err != nil {
+		return TrophyItemReward{}, Inventory{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return TrophyItemReward{}, Inventory{}, err
+	}
+	return reward, inventory, nil
 }
 
 func (w *Writer) GrantItem(ctx context.Context, userID, item string, amount int64) (Inventory, error) {
@@ -1026,19 +1114,11 @@ WHERE trophy_id=$1 AND claimed_at IS NULL`, plannedID, now); err != nil {
 		return nil, err
 	}
 	if won.RewardItem != "" && won.CollectedParts >= won.Total {
-		column := won.RewardItem
-		if column != "bomb" && column != "ice" && column != "experience" {
-			return nil, fmt.Errorf("unknown trophy reward item %q", column)
+		if won.RewardItem != "bomb" && won.RewardItem != "ice" && won.RewardItem != "experience" {
+			return nil, fmt.Errorf("unknown trophy reward item %q", won.RewardItem)
 		}
-		query := fmt.Sprintf(`INSERT INTO player_items(user_id,%s,updated_at) VALUES($1,$2,NOW())
-ON CONFLICT(user_id) DO UPDATE SET %s=player_items.%s+EXCLUDED.%s,updated_at=NOW()`, column, column, column, column)
-		if _, err := tx.Exec(ctx, query, recipientID, won.RewardAmount); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO trophy_reward_claims(trophy_id,user_id,item,amount,awarded_at,claimed_at) VALUES($1,$2,$3,$4,$5,NULL)`, won.ID, recipientID, won.RewardItem, won.RewardAmount, now); err != nil {
 			return nil, err
-		}
-		if won.Repeatable {
-			if _, err := tx.Exec(ctx, `INSERT INTO trophy_reward_claims(trophy_id,user_id,amount,claimed_at) VALUES($1,$2,$3,$4)`, won.ID, recipientID, won.RewardAmount, now); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if !won.Repeatable && won.CollectedParts >= won.Total {

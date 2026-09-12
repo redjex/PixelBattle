@@ -181,6 +181,9 @@ func allowedMethods(path string) string {
 	if strings.HasPrefix(path, "/api/profiles/") || strings.HasPrefix(path, "/api/boards/profiles/") {
 		return "GET"
 	}
+	if strings.HasPrefix(path, "/api/boards/trophy-items/") && strings.HasSuffix(path, "/claim") {
+		return "POST"
+	}
 	return ""
 }
 

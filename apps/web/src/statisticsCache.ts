@@ -27,6 +27,7 @@ function requestStatistics(initData: string, signal?: AbortSignal) {
     return response.json() as Promise<PlayerStatistics>;
   }).then((statistics) => {
     cachedStatistics = statistics;
+    window.dispatchEvent(new CustomEvent<PlayerStatistics>('pixelbattle:statistics-updated', { detail: statistics }));
     return statistics;
   });
 }

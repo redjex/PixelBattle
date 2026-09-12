@@ -18,8 +18,8 @@ function rewardsUrl() {
   return `${apiUrl}/api/boards/main/rewards`;
 }
 
-export function preloadRatingRewards(initData: string) {
-  if (cachedRatingRewards) return Promise.resolve(cachedRatingRewards);
+export function preloadRatingRewards(initData: string, force = false) {
+  if (!force && cachedRatingRewards) return Promise.resolve(cachedRatingRewards);
   if (!ratingRewardsRequest) {
     ratingRewardsRequest = fetch(rewardsUrl(), { cache: 'no-store', headers: { 'X-Telegram-Init-Data': initData } })
       .then((response) => {
@@ -50,17 +50,27 @@ export function RatingScreen({ onBack }: Props) {
   const playerName = user?.username ? `@${user.username}` : user?.first_name || 'Игрок';
   const trackProgress = Math.max(0, Math.min(1, (currentLevel - 1 + calculated.progress) / 99));
 
-  const loadRewards = () => {
+  const loadRewards = (force = false) => {
     const initData = window.Telegram?.WebApp?.initData;
     if (!initData) { setStatus('error'); return; }
     setStatus('loading');
-    preloadRatingRewards(initData)
+    preloadRatingRewards(initData, force)
       .then((result) => { setRewardState(result); setStatus('ready'); })
       .catch(() => setStatus('error'));
   };
 
   useEffect(() => {
-    if (!cachedRatingRewards) loadRewards();
+    loadRewards(true);
+    let refreshTimer = 0;
+    const handleStatisticsUpdated = () => {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => loadRewards(true), 100);
+    };
+    window.addEventListener('pixelbattle:statistics-updated', handleStatisticsUpdated);
+    return () => {
+      window.clearTimeout(refreshTimer);
+      window.removeEventListener('pixelbattle:statistics-updated', handleStatisticsUpdated);
+    };
   }, []);
   useLayoutEffect(() => {
     if (status !== 'ready') return;
@@ -97,7 +107,7 @@ export function RatingScreen({ onBack }: Props) {
     <div className="rating-screen">
       <img className="rating-logo" src="/assets/raiting.png" alt="Рейтинг" />
       {status === 'error' ? (
-        <div className="rating-status"><p>Не удалось загрузить награды.</p><button onClick={loadRewards}>Повторить</button></div>
+        <div className="rating-status"><p>Не удалось загрузить награды.</p><button onClick={() => loadRewards(true)}>Повторить</button></div>
       ) : status === 'loading' ? (
         <div className="rating-status"><p>Загружаем награды…</p></div>
       ) : (

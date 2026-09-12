@@ -43,12 +43,21 @@ export function getTelegramWebApp(): TelegramWebApp | null { return window.Teleg
 
 // Admin capabilities must be granted by the server after validating initData.
 
+export type TrophyItemReward = {
+  rewardId: number;
+  trophyId: string;
+  item: 'bomb' | 'ice' | 'experience';
+  amount: number;
+  awardedAt: string;
+};
+
 export type AppAccess = {
   testMode: boolean;
   isAdmin: boolean;
   accessAllowed: boolean;
   online: number | null;
   prizes: unknown[];
+  pendingItemRewards: TrophyItemReward[];
   soldOutTrophies: string[];
 };
 
@@ -76,10 +85,22 @@ export async function fetchAppAccess(initData: string): Promise<AppAccess> {
   const isAdmin = payload.isAdmin === true;
   const online = typeof payload.online === 'number' && Number.isFinite(payload.online) ? Math.max(0, payload.online) : null;
   const prizes = Array.isArray(payload.prizes) ? payload.prizes : [];
+  const pendingItemRewards = Array.isArray(payload.pendingItemRewards)
+    ? payload.pendingItemRewards.filter((reward): reward is TrophyItemReward => {
+      if (!reward || typeof reward !== 'object') return false;
+      const item = (reward as Partial<TrophyItemReward>).item;
+      return Number.isSafeInteger((reward as Partial<TrophyItemReward>).rewardId)
+        && Number((reward as Partial<TrophyItemReward>).rewardId) > 0
+        && typeof (reward as Partial<TrophyItemReward>).trophyId === 'string'
+        && (item === 'bomb' || item === 'ice' || item === 'experience')
+        && Number.isFinite((reward as Partial<TrophyItemReward>).amount)
+        && Number((reward as Partial<TrophyItemReward>).amount) > 0;
+    })
+    : [];
   const soldOutTrophies = Array.isArray(payload.soldOutTrophies)
     ? payload.soldOutTrophies.filter((id): id is string => typeof id === 'string')
     : [];
-  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online, prizes, soldOutTrophies };
+  return { testMode, isAdmin, accessAllowed: payload.accessAllowed !== false && (!testMode || isAdmin), online, prizes, pendingItemRewards, soldOutTrophies };
 }
 
 export async function authenticateTelegram(initData: string): Promise<AppAccess | null> {

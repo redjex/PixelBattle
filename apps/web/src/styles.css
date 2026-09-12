@@ -71,11 +71,11 @@ button { color: inherit; }
 
 .battle-screen, .board-wrap { position: absolute; inset: 0; background: #fff; touch-action: none; overscroll-behavior: none; }
 .board-wrap { background-color:#A8A8A8; background-image:conic-gradient(#A8A8A8 25%,#CACACA 0 50%,#A8A8A8 0 75%,#CACACA 0); background-size:16px 16px; }
-.main-menu, .stats-screen, .rating-screen, .agreement-screen, .gifts-screen, .gifts-catalog-screen { position:absolute; inset:0; overflow:hidden; background:#fff; }
+.main-menu, .stats-screen, .rating-screen, .agreement-screen, .settings-screen, .gifts-screen, .gifts-catalog-screen { position:absolute; inset:0; overflow:hidden; background:#fff; }
 .main-menu { position:absolute; left:50%; top:50%; width:min(100vw, calc(100vh * 402 / 874), 402px); height:auto; aspect-ratio:402 / 874; transform:translate(-50%, -50%); border-radius:0; background:#fff; }
-.stats-screen, .rating-screen, .agreement-screen, .gifts-screen, .gifts-catalog-screen { left:50%; top:50%; width:min(100vw, calc(100vh * 402 / 874), 402px); height:auto; aspect-ratio:402 / 874; transform:translate(-50%, -50%); }
+.stats-screen, .rating-screen, .agreement-screen, .settings-screen, .gifts-screen, .gifts-catalog-screen { left:50%; top:50%; width:min(100vw, calc(100vh * 402 / 874), 402px); height:auto; aspect-ratio:402 / 874; transform:translate(-50%, -50%); }
 @media (max-width:700px) {
-  .main-menu, .stats-screen, .rating-screen, .agreement-screen, .gifts-screen, .gifts-catalog-screen { left:0; top:0; width:100vw; height:100%; aspect-ratio:auto; transform:none; }
+  .main-menu, .stats-screen, .rating-screen, .agreement-screen, .settings-screen, .gifts-screen, .gifts-catalog-screen { left:0; top:0; width:100vw; height:100%; aspect-ratio:auto; transform:none; }
 }
 .menu-logo { position:absolute; z-index:1; top:calc(70px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:325px; max-width:calc(100% - 56px); height:auto; transform:translateX(-50%); image-rendering:pixelated; }
 .menu-art { position:absolute; left:16px; right:16px; top:190px; bottom:180px; display:grid; place-items:center; overflow:hidden; }
@@ -153,8 +153,24 @@ button { color: inherit; }
 .trophy-name { max-width:145px; color:#008efb; font-size:14px; line-height:15px; white-space:normal; overflow-wrap:anywhere; }
 .trophy-item-liberty-figure-252202 .trophy-name { max-width:none; font-size:11px; white-space:nowrap; overflow-wrap:normal; }
 .trophy-progress { margin-top:2px; color:#000; font-size:10px; }
+.trophy-reward-backdrop { position:absolute; z-index:50; inset:0; display:grid; place-items:center; padding:24px; box-sizing:border-box; background:rgba(0,0,0,.68); }
+.trophy-reward-dialog { position:relative; width:min(100%,330px); box-sizing:border-box; padding:29px 20px 24px; border:4px solid #000; background:#fff; box-shadow:7px 7px 0 rgba(0,0,0,.45); text-align:center; }
+.trophy-reward-close { position:absolute; top:7px; right:9px; width:31px; height:31px; padding:0; border:0; color:#000; background:transparent; font:28px/28px Arial,sans-serif; cursor:pointer; }
+.trophy-reward-image { display:block; width:184px; height:184px; margin:2px auto 15px; object-fit:contain; image-rendering:auto; }
+.trophy-item-reward-image { width:116px; height:116px; margin:20px auto 24px; image-rendering:pixelated; }
+.trophy-reward-dialog h2 { margin:0; font:400 19px/1.25 "Minecraft Rus",monospace; }
+.trophy-reward-status, .trophy-reward-error { margin:18px 0 3px; font:400 12px/1.45 "Minecraft Rus",monospace; }
+.trophy-reward-error { color:#b52323; }
+.trophy-reward-code-block { margin-top:19px; }
+.trophy-reward-code-block label { display:block; margin-bottom:8px; font:400 12px/1.2 "Minecraft Rus",monospace; }
+.trophy-reward-code-row { display:flex; gap:7px; }
+.trophy-reward-code-row input { min-width:0; flex:1; height:39px; box-sizing:border-box; padding:0 9px; border:3px solid #000; border-radius:0; color:#000; background:#fff; font:400 13px/1 "Minecraft Rus",monospace; text-overflow:ellipsis; }
+.trophy-reward-code-row button, .trophy-reward-get { min-height:39px; box-sizing:border-box; padding:0 12px; border:3px solid #000; color:#fff; background:#000; font:400 11px/33px "Minecraft Rus",monospace; text-decoration:none; cursor:pointer; }
+.trophy-reward-get { display:block; width:100%; margin-top:20px; font-size:14px; }
+.trophy-reward-get:disabled { opacity:.55; cursor:default; transform:none; }
+.trophy-reward-code-row button:active, .trophy-reward-get:active { transform:translateY(2px); }
 .stats-content { position:absolute; inset:118px 20px 28px; overflow:auto; padding:18px 8px; }
-.stats-redesign { inset:0; padding:0 18px 150px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }
+.stats-redesign { inset:0; padding:0 18px 210px; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; overscroll-behavior-y:contain; -webkit-overflow-scrolling:touch; font-family:"Minecraft Rus", monospace; color:#000; }
 .stats-top-cards { display:grid; grid-template-columns:1fr; gap:8px; margin:0 auto 16px; max-width:370px; }
 .stats-pixel-card { min-height:88px; padding:10px 8px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; background:#fff; border:2px solid #000; border-radius:7px; box-shadow:none; }
 .stats-pixel-card > span { font-size:11px; line-height:1.2; }
@@ -205,6 +221,9 @@ button { color: inherit; }
 .stats-agreement:disabled { color:#000; opacity:1; }
 .stats-back { position:absolute; left:50%; bottom:50px; display:block; box-sizing:border-box; width:calc(100% - 66px); height:60px; min-height:60px; margin:0; padding:0; border:4px solid #fff; border-radius:10px; color:#fff; background:#000; box-shadow:0 0 0 4px #000; font-family:"Minecraft Rus", monospace; font-size:20px; font-weight:400; line-height:normal; transform:translateX(-50%); }
 .stats-screen .stats-back { z-index:3; }
+.stats-settings-button { position:absolute; left:50%; bottom:32px; z-index:2; display:block; box-sizing:border-box; width:calc(100% - 100px); height:48px; min-height:48px; margin:0; padding:0; border:2px solid #000; border-radius:10px; color:#000; background:#fff; box-shadow:0 0 0 2px #000; font-family:"Minecraft Rus", monospace; font-size:14px; font-weight:400; line-height:normal; transform:translateX(-50%); cursor:pointer; }
+.settings-title { margin:calc(96px + var(--tg-content-safe-area-inset-top, 0px)) 0 0; text-align:center; font:400 28px/1.2 "Minecraft Rus",monospace; }
+.settings-placeholder { margin:28px 24px; color:#777; text-align:center; font:400 14px/1.5 "Minecraft Rus",monospace; }
 .rating-screen { font-family:"Minecraft Rus",monospace; color:#000; }
 .rating-screen::after { content:""; position:absolute; z-index:2; right:0; bottom:0; left:0; height:168px; pointer-events:none; background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.78) 42%,#fff 72%); }
 .rating-logo { position:absolute; z-index:3; top:calc(72px + var(--tg-content-safe-area-inset-top, 0px)); left:50%; width:223px; height:63px; object-fit:contain; transform:translateX(-50%); image-rendering:pixelated; }

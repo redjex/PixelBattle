@@ -4,7 +4,7 @@ import { currentDailyKey, getDailyQuests } from '../dailyQuests';
 import { getLevelReward, getPlayerLevelProgress } from '../playerLevel';
 
 type LoadState = 'loading' | 'ready' | 'error';
-type Props = { onBack: () => void; onOpenAgreement: () => void; onOpenRating: () => void };
+type Props = { onBack: () => void; onOpenAgreement: () => void; onOpenRating: () => void; onOpenSettings: () => void };
 
 const emptyStats: PlayerStatistics = {
   placedPixels: 0,
@@ -34,7 +34,7 @@ function CasinoStatNumber({ value }: { value: number }) {
   );
 }
 
-export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating }: Props) {
+export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating, onOpenSettings }: Props) {
   const initialStatistics = getCachedStatistics();
   const [stats, setStats] = useState<PlayerStatistics>(initialStatistics ?? emptyStats);
   const [loadState, setLoadState] = useState<LoadState>(initialStatistics ? 'ready' : 'loading');
@@ -127,6 +127,7 @@ export function StatisticsScreen({ onBack, onOpenAgreement, onOpenRating }: Prop
           </>
         )}
       </section>
+      <button className="stats-settings-button" onClick={onOpenSettings}>Настройки</button>
       <button className="stats-back" onClick={onBack}>Назад</button>
     </div>
   );

@@ -4,6 +4,7 @@ import { PixelBoard } from './PixelBoard';
 import type { Pixel } from '../types/pixel';
 import { dispatchTrophyAward } from '../hooks/usePixelSocket';
 import { SeasonStatus } from './SeasonStatus';
+import { loadTemplate, removeTemplate, saveTemplateImage, saveTemplatePlacement, type TemplatePlacement } from '../templateStorage';
 
 const COLORS = [
   '#FF8080', '#FFCA73', '#FBFFA5', '#7CFF80', '#7EFFF2', '#84D0FF', '#8290FF', '#CD81FF', '#FF80D0', '#FDFDFD',
@@ -71,11 +72,13 @@ export function BattleScreen({ online }: { online: number | null }) {
   const [infoOpen, setInfoOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [templateImageUrl, setTemplateImageUrl] = useState<string | null>(null);
+  const [templatePlacement, setTemplatePlacement] = useState<TemplatePlacement | null>(null);
   const [inventory, setInventory] = useState<Inventory>(EMPTY_INVENTORY);
   const [itemBusy, setItemBusy] = useState<'bomb' | 'ice' | null>(null);
   const [itemMode, setItemMode] = useState<'bomb' | 'ice' | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   const templateInputRef = useRef<HTMLInputElement>(null);
+  const templateSelectionRevisionRef = useRef(0);
   const currentUserID = String(window.Telegram?.WebApp?.initDataUnsafe?.user?.id ?? '');
   const frozenUntil = inspectedPixel?.frozenUntil ? Date.parse(inspectedPixel.frozenUntil) : 0;
   const frozenSeconds = Math.max(0, Math.ceil((frozenUntil - clock) / 1000));
@@ -114,7 +117,7 @@ export function BattleScreen({ online }: { online: number | null }) {
       const difference = clampedTarget - current;
       const next = Math.abs(difference) < Math.max(0.002, clampedTarget * 0.001)
         ? clampedTarget
-        : current + difference * 0.2;
+        : current + difference * 0.24;
       zoomRef.current = next;
       setZoom(next);
       if (next === clampedTarget) {
@@ -133,6 +136,23 @@ export function BattleScreen({ online }: { online: number | null }) {
   useEffect(() => () => {
     if (templateImageUrl) URL.revokeObjectURL(templateImageUrl);
   }, [templateImageUrl]);
+
+  useEffect(() => {
+    if (!currentUserID) return;
+    let disposed = false;
+    const selectionRevision = templateSelectionRevisionRef.current;
+    void loadTemplate(currentUserID).then((stored) => {
+      if (disposed || selectionRevision !== templateSelectionRevisionRef.current || !stored?.image) return;
+      setTemplatePlacement(stored.placement ?? null);
+      setTemplateImageUrl(URL.createObjectURL(stored.image));
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, [currentUserID]);
+
+  const persistTemplatePlacement = useCallback((placement: TemplatePlacement) => {
+    setTemplatePlacement(placement);
+    if (currentUserID) void saveTemplatePlacement(currentUserID, placement).catch(() => undefined);
+  }, [currentUserID]);
 
   useEffect(() => {
     if (!cooldownUntil) return;
@@ -346,6 +366,8 @@ export function BattleScreen({ online }: { online: number | null }) {
           window.dispatchEvent(new Event('pixelbattle:placement-accepted'));
         }}
         templateImageUrl={templateImageUrl}
+        templatePlacement={templatePlacement}
+        onTemplatePlacementChange={persistTemplatePlacement}
       />
       <GlassControls
         zoom={zoom}
@@ -353,7 +375,10 @@ export function BattleScreen({ online }: { online: number | null }) {
         onImageTemplate={() => templateInputRef.current?.click()}
         hasImageTemplate={Boolean(templateImageUrl)}
         onCancelImageTemplate={() => {
+          templateSelectionRevisionRef.current += 1;
           setTemplateImageUrl(null);
+          setTemplatePlacement(null);
+          if (currentUserID) void removeTemplate(currentUserID).catch(() => undefined);
         }}
       />
       <input
@@ -365,7 +390,10 @@ export function BattleScreen({ online }: { online: number | null }) {
           const file = event.target.files?.[0];
           event.target.value = '';
           if (!file || !file.type.startsWith('image/') || file.size > 20 * 1024 * 1024) return;
+          templateSelectionRevisionRef.current += 1;
+          setTemplatePlacement(null);
           setTemplateImageUrl(URL.createObjectURL(file));
+          if (currentUserID) void saveTemplateImage(currentUserID, file).catch(() => undefined);
         }}
       />
 

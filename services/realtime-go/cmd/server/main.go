@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -260,9 +261,11 @@ func main() {
 		inventory := persistence.Inventory{}
 		prizes := json.RawMessage("[]")
 		soldOutTrophies := []string{}
+		pendingItemRewards := []persistence.TrophyItemReward{}
 		if writer != nil {
 			identity := strconv.FormatInt(telegramUser.ID, 10)
 			inventory, _ = writer.Inventory(r.Context(), identity)
+			pendingItemRewards, _ = writer.PendingTrophyItemRewards(r.Context(), identity)
 			if storedPrizes, err := writer.Prizes(r.Context(), identity); err == nil {
 				prizes = storedPrizes
 			}
@@ -272,7 +275,7 @@ func main() {
 				log.Printf("trophy availability failed: %v", err)
 			}
 		}
-		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "prizes": prizes, "soldOutTrophies": soldOutTrophies, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true})
+		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "prizes": prizes, "pendingItemRewards": pendingItemRewards, "soldOutTrophies": soldOutTrophies, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true})
 	})
 	http.HandleFunc("/api/boards/main/rewards", func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -329,6 +332,53 @@ func main() {
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, map[string]any{"currentLevel": currentLevel, "claimedLevels": claimedLevels, "inventory": inventory})
+	})
+	http.HandleFunc("/api/boards/trophy-items/", func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/api/boards/trophy-items/"
+		const suffix = "/claim"
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, suffix) {
+			http.NotFound(w, r)
+			return
+		}
+		rawID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), suffix)
+		if rawID == "" || strings.Contains(rawID, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		rewardID, err := strconv.ParseInt(rawID, 10, 64)
+		if err != nil || rewardID <= 0 {
+			http.Error(w, "invalid reward", http.StatusBadRequest)
+			return
+		}
+		telegramUser, err := telegramUserFromRequest(r)
+		if err != nil {
+			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "rewards unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		reward, inventory, err := writer.ClaimTrophyItemReward(r.Context(), identity, rewardID)
+		if errors.Is(err, persistence.ErrTrophyItemRewardNotFound) {
+			http.Error(w, "reward not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, persistence.ErrTrophyItemRewardClaimed) {
+			http.Error(w, "reward already claimed", http.StatusConflict)
+			return
+		}
+		if err != nil {
+			log.Printf("trophy item claim failed: user=%s reward=%d: %v", identity, rewardID, err)
+			http.Error(w, "failed to claim reward", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]any{"claimed": true, "reward": reward, "inventory": inventory})
 	})
 	http.HandleFunc("/api/boards/items/ice/activate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
