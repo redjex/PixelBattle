@@ -242,8 +242,7 @@ CREATE TABLE IF NOT EXISTS trophy_reward_assignments (
  assigned_at timestamptz NOT NULL DEFAULT NOW(),
  PRIMARY KEY (user_id,trophy_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS trophy_reward_assignments_unique_code_idx
-ON trophy_reward_assignments(trophy_id,reward_value) WHERE reward_kind='code';
+DROP INDEX IF EXISTS trophy_reward_assignments_unique_code_idx;
 CREATE TABLE IF NOT EXISTS trophy_reward_requests (
  request_id bigserial PRIMARY KEY,
  user_id text NOT NULL,
