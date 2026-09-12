@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { GlassControls } from './GlassControls';
 import { PixelBoard } from './PixelBoard';
 import type { Pixel } from '../types/pixel';
@@ -18,6 +18,13 @@ const PROFILE_CACHE_MS = 5000;
 const profileCache = new Map<string, { profile: PixelAuthor; expiresAt: number }>();
 const profileRequests = new Map<string, Promise<PixelAuthor | null>>();
 const EMPTY_INVENTORY: Inventory = { bombs: 0, ice: 0, freezeRemaining: 0 };
+
+function openTelegramProfile(event: ReactMouseEvent<HTMLAnchorElement>, username: string) {
+  const telegram = window.Telegram?.WebApp;
+  if (!telegram?.openTelegramLink) return;
+  event.preventDefault();
+  telegram.openTelegramLink(`https://t.me/${username}`);
+}
 
 function RollingCoordinate({ value }: { value: number }) {
   const [transition, setTransition] = useState({ from: value, to: value, revision: 0 });
@@ -421,7 +428,7 @@ export function BattleScreen({ online }: { online: number | null }) {
                  ? <img className="pixel-owner-avatar" src={safePhotoUrl} alt="" />
                 : <span className="pixel-owner-avatar pixel-owner-fallback">{authorLabel.slice(0, 1).toUpperCase()}</span>}
               {safeUsername
-                ? <a className="pixel-owner-name" href={`https://t.me/${safeUsername}`} target="_blank" rel="noreferrer" aria-label={`Открыть профиль ${authorLabel}`}>{authorLabel}</a>
+                ? <a className="pixel-owner-name" href={`https://t.me/${safeUsername}`} target="_blank" rel="noreferrer" onClick={(event) => openTelegramProfile(event, safeUsername)} aria-label={`Открыть профиль ${authorLabel}`}>{authorLabel}</a>
                 : <span className="pixel-owner-name">{authorLabel}</span>}
               <span className="pixel-owner-balance" aria-hidden="true" />
             </div>}
@@ -474,7 +481,7 @@ export function BattleScreen({ online }: { online: number | null }) {
             <div className="profile-modal-identity">
               <strong>{authorTitle}</strong>
                {safeUsername
-                 ? <a href={`https://t.me/${safeUsername}`} target="_blank" rel="noreferrer">{authorIdentity}</a>
+                 ? <a href={`https://t.me/${safeUsername}`} target="_blank" rel="noreferrer" onClick={(event) => openTelegramProfile(event, safeUsername)}>{authorIdentity}</a>
                 : <span>{authorIdentity}</span>}
             </div>
           </section>

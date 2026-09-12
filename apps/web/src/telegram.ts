@@ -22,6 +22,8 @@ export type TelegramWebApp = {
   isVerticalSwipesEnabled?: boolean;
   requestFullscreen?: () => void;
   exitFullscreen?: () => void;
+  openTelegramLink?: (url: string) => void;
+  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
   isFullscreen?: boolean;
   safeAreaInset?: { top: number; bottom: number; left: number; right: number };
   contentSafeAreaInset?: { top: number; bottom: number; left: number; right: number };
