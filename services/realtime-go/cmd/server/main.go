@@ -738,7 +738,7 @@ func main() {
 	}
 	http.HandleFunc("/api/boards/main/stats", statsHandler)
 	http.HandleFunc("/api/profiles/me", statsHandler)
-	http.HandleFunc("/api/profiles/me/privacy", func(w http.ResponseWriter, r *http.Request) {
+	privacyHandler := func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
 		if err != nil {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
@@ -773,7 +773,9 @@ func main() {
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, map[string]bool{"hideUsername": profile.HideUsername})
-	})
+	}
+	http.HandleFunc("/api/profiles/me/privacy", privacyHandler)
+	http.HandleFunc("/api/boards/profiles/me/privacy", privacyHandler)
 	profileHandler := func(w http.ResponseWriter, r *http.Request) {
 		if _, err := telegramUserFromRequest(r); err != nil {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)

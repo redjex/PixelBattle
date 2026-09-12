@@ -26,7 +26,7 @@ export function SettingsScreen({ onBack }: Props) {
     const controller = new AbortController();
     const revision = privacyRevisionRef.current;
     const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
-    void fetch(`${apiUrl}/api/profiles/me/privacy`, {
+    void fetch(`${apiUrl}/api/boards/profiles/me/privacy`, {
       cache: 'no-store',
       signal: controller.signal,
       headers: { 'X-Telegram-Init-Data': initData },
@@ -59,7 +59,7 @@ export function SettingsScreen({ onBack }: Props) {
     setPrivacyBusy(true);
     try {
       const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
-      const response = await fetch(`${apiUrl}/api/profiles/me/privacy`, {
+      const response = await fetch(`${apiUrl}/api/boards/profiles/me/privacy`, {
         method: 'PUT',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
