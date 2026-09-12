@@ -67,13 +67,26 @@ CAPTCHA_ALERT_CHAT_ID = int(os.getenv("CAPTCHA_ALERT_CHAT_ID", "-1004326871238")
 REWARD_REQUEST_POLL_SECONDS = 5
 TROPHY_ALERT_CHAT_ID = int(os.getenv("TROPHY_ALERT_CHAT_ID", str(CAPTCHA_ALERT_CHAT_ID)))
 TROPHY_TOPIC_NAME = os.getenv("TROPHY_TOPIC_NAME", "Трофеи").strip() or "Трофеи"
+COMMON_REWARDS_TOPIC_NAME = (
+    os.getenv("COMMON_REWARDS_TOPIC_NAME", "Обычные награды").strip()
+    or "Обычные награды"
+)
 TROPHY_NOTIFICATION_INTERVAL_SECONDS = float(
     os.getenv("TROPHY_NOTIFICATION_INTERVAL_SECONDS", "3.5")
 )
 if TROPHY_NOTIFICATION_INTERVAL_SECONDS < 3:
     raise RuntimeError("TROPHY_NOTIFICATION_INTERVAL_SECONDS must be at least 3")
 TROPHY_NOTIFICATION_POLL_SECONDS = 5
-TROPHY_TOPIC_KEY = f"pixelbattle:trophies:topic:{TROPHY_ALERT_CHAT_ID}"
+NOTIFICATION_TOPICS = {
+    "trophy": (
+        TROPHY_TOPIC_NAME,
+        f"pixelbattle:trophies:topic:{TROPHY_ALERT_CHAT_ID}",
+    ),
+    "common": (
+        COMMON_REWARDS_TOPIC_NAME,
+        f"pixelbattle:common-rewards:topic:{TROPHY_ALERT_CHAT_ID}",
+    ),
+}
 TROPHY_IMAGE_PATHS = {
     "experience": "/assets/trophy-notifications/experience.png",
     "bomb": "/assets/trophy-notifications/bomb.png",
@@ -687,8 +700,12 @@ def trophy_reward_notification_loop() -> None:
         time.sleep(REWARD_REQUEST_POLL_SECONDS)
 
 
-def trophy_topic_id() -> int:
-    cached = database.get(TROPHY_TOPIC_KEY)
+def notification_topic_id(category: str) -> int:
+    topic = NOTIFICATION_TOPICS.get(category)
+    if not topic:
+        raise RuntimeError("Unknown trophy notification category")
+    topic_name, topic_key = topic
+    cached = database.get(topic_key)
     if cached and str(cached).isdigit():
         return int(cached)
     chat = call("getChat", {"chat_id": TROPHY_ALERT_CHAT_ID}).get("result", {})
@@ -696,17 +713,21 @@ def trophy_topic_id() -> int:
         raise RuntimeError("Trophy notification chat is not a forum")
     result = call(
         "createForumTopic",
-        {"chat_id": TROPHY_ALERT_CHAT_ID, "name": TROPHY_TOPIC_NAME},
+        {"chat_id": TROPHY_ALERT_CHAT_ID, "name": topic_name},
     )
     topic_id = result.get("result", {}).get("message_thread_id")
     if not isinstance(topic_id, int) or topic_id <= 0:
         raise RuntimeError("Telegram returned an invalid forum topic")
-    database.set(TROPHY_TOPIC_KEY, str(topic_id))
+    database.set(topic_key, str(topic_id))
     print(
-        f"trophy forum topic created: chat={TROPHY_ALERT_CHAT_ID} topic={topic_id}",
+        f"notification forum topic created: category={category} chat={TROPHY_ALERT_CHAT_ID} topic={topic_id}",
         flush=True,
     )
     return topic_id
+
+
+def trophy_topic_id() -> int:
+    return notification_topic_id("trophy")
 
 
 def fetch_trophy_chat_notifications() -> list[dict[str, Any]]:
@@ -743,15 +764,16 @@ def notify_trophy_chat() -> None:
     notifications = fetch_trophy_chat_notifications()
     if not notifications:
         return
-    topic_id = trophy_topic_id()
     for notification in notifications:
         if not isinstance(notification, dict):
             continue
         notification_id = str(notification.get("notificationId", ""))
+        category = str(notification.get("category", ""))
         trophy_id = str(notification.get("trophyId", ""))
         user_id = str(notification.get("userId", ""))
-        if not notification_id or not trophy_id or not user_id:
+        if category not in NOTIFICATION_TOPICS or not notification_id or not trophy_id or not user_id:
             continue
+        topic_id = notification_topic_id(category)
         image_path = TROPHY_IMAGE_PATHS.get(trophy_id, "/assets/main.png")
         try:
             call(

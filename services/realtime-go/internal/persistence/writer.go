@@ -607,6 +607,7 @@ type TrophyRewardRequest struct {
 
 type TrophyChatNotification struct {
 	NotificationID string    `json:"notificationId"`
+	Category       string    `json:"category"`
 	UserID         string    `json:"userId"`
 	DisplayName    string    `json:"displayName"`
 	Username       string    `json:"username,omitempty"`
@@ -622,6 +623,7 @@ func (w *Writer) PendingTrophyChatNotifications(ctx context.Context, limit int) 
 	rows, err := w.pool.Query(ctx, `
 WITH trophy_events AS (
   SELECT 'winner:'||winners.trophy_id||':'||winners.user_id AS notification_id,
+         'trophy' AS category,
          winners.user_id,
          winners.trophy_id,
          COALESCE((
@@ -638,6 +640,7 @@ WITH trophy_events AS (
   WHERE winners.trophy_id NOT IN ('experience','bomb','ice')
   UNION ALL
   SELECT 'claim:'||claims.claim_id,
+         'common',
          claims.user_id,
          claims.trophy_id,
          CASE claims.trophy_id
@@ -653,6 +656,7 @@ WITH trophy_events AS (
   JOIN profiles ON profiles.telegram_id=claims.user_id
 )
 SELECT events.notification_id,
+       events.category,
        events.user_id,
        events.display_name,
        events.username,
@@ -672,7 +676,7 @@ LIMIT $1`, limit)
 	notifications := make([]TrophyChatNotification, 0)
 	for rows.Next() {
 		var notification TrophyChatNotification
-		if err := rows.Scan(&notification.NotificationID, &notification.UserID, &notification.DisplayName, &notification.Username, &notification.TrophyID, &notification.TrophyName, &notification.CompletedAt); err != nil {
+		if err := rows.Scan(&notification.NotificationID, &notification.Category, &notification.UserID, &notification.DisplayName, &notification.Username, &notification.TrophyID, &notification.TrophyName, &notification.CompletedAt); err != nil {
 			return nil, err
 		}
 		notifications = append(notifications, notification)

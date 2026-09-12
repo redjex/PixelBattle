@@ -237,7 +237,7 @@ def test_trophy_topic_is_created_once_and_cached():
         "createForumTopic",
         {"chat_id": bot.TROPHY_ALERT_CHAT_ID, "name": "Трофеи"},
     )
-    cache.assert_called_once_with(bot.TROPHY_TOPIC_KEY, "77")
+    cache.assert_called_once_with(bot.NOTIFICATION_TOPICS["trophy"][1], "77")
 
 
 def test_trophy_topic_is_not_created_until_topics_are_enabled():
@@ -255,6 +255,7 @@ def test_trophy_topic_is_not_created_until_topics_are_enabled():
 def test_trophy_notification_sends_photo_to_topic_and_acknowledges():
     notification = {
         "notificationId": "winner:bear-redjex:789",
+        "category": "trophy",
         "userId": "789",
         "displayName": "Игрок",
         "username": "player",
@@ -265,7 +266,7 @@ def test_trophy_notification_sends_photo_to_topic_and_acknowledges():
     response = Mock()
     with patch.object(
         bot, "fetch_trophy_chat_notifications", return_value=[notification]
-    ), patch.object(bot, "trophy_topic_id", return_value=77), patch.object(
+    ), patch.object(bot, "notification_topic_id", return_value=77) as topic, patch.object(
         bot, "call"
     ) as call, patch.object(
         bot, "realtime_request", return_value=response
@@ -275,6 +276,7 @@ def test_trophy_notification_sends_photo_to_topic_and_acknowledges():
     method, payload = call.call_args.args
     assert method == "sendPhoto"
     assert payload["message_thread_id"] == 77
+    topic.assert_called_once_with("trophy")
     assert payload["photo"].endswith("/assets/trophies/bear-redjex.png?v=1")
     assert "Игрок (@player)" in payload["caption"]
     assert "12.09.2026 в 17:34 (UTC+5)" in payload["caption"]
@@ -284,3 +286,25 @@ def test_trophy_notification_sends_photo_to_topic_and_acknowledges():
         json={"notificationId": "winner:bear-redjex:789"},
     )
     response.raise_for_status.assert_called_once()
+
+
+def test_common_rewards_use_their_own_topic():
+    notification = {
+        "notificationId": "claim:42",
+        "category": "common",
+        "userId": "789",
+        "displayName": "Игрок",
+        "trophyId": "ice",
+        "trophyName": "Заморозки ×5",
+        "completedAt": "2026-09-12T12:34:00Z",
+    }
+    response = Mock()
+    with patch.object(
+        bot, "fetch_trophy_chat_notifications", return_value=[notification]
+    ), patch.object(
+        bot, "notification_topic_id", return_value=88
+    ) as topic, patch.object(bot, "call"), patch.object(
+        bot, "realtime_request", return_value=response
+    ), patch.object(bot.time, "sleep"):
+        bot.notify_trophy_chat()
+    topic.assert_called_once_with("common")
