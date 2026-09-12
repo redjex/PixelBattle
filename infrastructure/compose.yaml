@@ -79,6 +79,7 @@ services:
   web:
     build: ../apps/web
     ports: ["127.0.0.1:5173:80"]
+    restart: unless-stopped
     depends_on: [realtime, api]
 
 volumes:
