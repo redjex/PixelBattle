@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS profiles (
  updated_at timestamptz NOT NULL DEFAULT NOW()
 );
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS prizes jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hide_username boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS board_clear_backups (
  backup_id text PRIMARY KEY,
  board_id text NOT NULL,
@@ -555,9 +556,20 @@ ON CONFLICT(telegram_id) DO UPDATE SET
 
 func (w *Writer) Profile(ctx context.Context, telegramID string) (domain.PixelAuthor, error) {
 	var profile domain.PixelAuthor
-	err := w.pool.QueryRow(ctx, `SELECT telegram_id,display_name,username,photo_url FROM profiles WHERE telegram_id=$1`, telegramID).
-		Scan(&profile.ID, &profile.DisplayName, &profile.Username, &profile.PhotoURL)
+	err := w.pool.QueryRow(ctx, `SELECT telegram_id,display_name,username,photo_url,hide_username FROM profiles WHERE telegram_id=$1`, telegramID).
+		Scan(&profile.ID, &profile.DisplayName, &profile.Username, &profile.PhotoURL, &profile.HideUsername)
 	return profile, err
+}
+
+func (w *Writer) SetProfileHideUsername(ctx context.Context, telegramID string, hide bool) error {
+	result, err := w.pool.Exec(ctx, `UPDATE profiles SET hide_username=$2,updated_at=NOW() WHERE telegram_id=$1`, telegramID, hide)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (w *Writer) Prizes(ctx context.Context, telegramID string) (json.RawMessage, error) {

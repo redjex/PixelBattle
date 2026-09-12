@@ -350,6 +350,18 @@ function TrophyRewardDialog({ trophy, onClose }: { trophy: TrophyDefinition; onC
     }
   };
 
+  const notifyRewardRequest = () => {
+    const initData = window.Telegram?.WebApp?.initData;
+    if (!initData || !reward || reward.kind !== 'url') return;
+    const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
+    void fetch(`${apiUrl}/api/boards/trophies/${encodeURIComponent(trophy.id)}/request`, {
+      method: 'POST',
+      cache: 'no-store',
+      keepalive: true,
+      headers: { 'X-Telegram-Init-Data': initData },
+    }).catch(() => undefined);
+  };
+
   return (
     <div className="trophy-reward-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="trophy-reward-dialog" role="dialog" aria-modal="true" aria-labelledby="trophy-reward-title">
@@ -368,7 +380,7 @@ function TrophyRewardDialog({ trophy, onClose }: { trophy: TrophyDefinition; onC
           </div>
         )}
         {reward?.kind === 'url' && (
-          <a className="trophy-reward-get" href={reward.value} target="_blank" rel="noreferrer">Получить</a>
+          <a className="trophy-reward-get" href={reward.value} target="_blank" rel="noreferrer" onClick={notifyRewardRequest}>Получить</a>
         )}
         {reward && trophy.id === 'stashvpn' && (
           <a className="trophy-reward-get" href="https://t.me/StashNetBot" target="_blank" rel="noreferrer">Открыть бота</a>
@@ -442,14 +454,14 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
   const ownedTrophies = useMemo(() => TROPHIES
     .map((trophy) => ({ trophy, collected: prizeParts(prizes, trophy) }))
     .filter(({ trophy, collected }) => trophy.total > 1 && collected.size > 0), [prizes]);
-  const ownedGroups = useMemo(() => TROPHY_CATALOG_GROUPS
+  const inventoryGroups = useMemo(() => TROPHY_CATALOG_GROUPS
     .map((group) => ({
       ...group,
       trophies: group.trophyIds
         .map((trophyId) => ownedTrophies.find(({ trophy }) => trophy.id === trophyId))
         .filter((entry): entry is (typeof ownedTrophies)[number] => Boolean(entry)),
     }))
-    .filter(({ trophies }) => trophies.length > 0), [ownedTrophies]);
+    .filter(({ rarity, trophies }) => trophies.length > 0 || (rarity === 'common' && pendingItemRewards.length > 0)), [ownedTrophies, pendingItemRewards.length]);
 
   return (
     <div className="gifts-screen">
@@ -461,30 +473,9 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
           <p className="gifts-empty-hint">Вы можете получить трофеи,<br />просто играя в PixelBattle</p>
         </section>
       )}
-      {ownedTrophies.length > 0 && (
+      {(ownedTrophies.length > 0 || pendingItemRewards.length > 0) && (
         <section className="gifts-inventory" aria-label="Полученные трофеи">
-          {pendingItemRewards.length > 0 && (
-            <section className="trophy-rarity-section trophy-rarity-common">
-              <header className="trophy-rarity-heading">
-                <span className="trophy-rarity-mark" aria-hidden="true" />
-                <h2>Обычные</h2>
-                <span className="trophy-rarity-line" aria-hidden="true" />
-              </header>
-              <div className="trophy-rarity-grid">
-                {pendingItemRewards.map((reward) => {
-                  const icon = reward.item === 'bomb' ? '/assets/bomb.svg' : reward.item === 'ice' ? '/assets/ice.svg' : '/assets/exp.svg?v=2';
-                  return (
-                    <article className={`trophy-item trophy-item-${reward.item}`} key={reward.rewardId}>
-                      <div className="trophy-card"><SinglePartTrophyCard icon={icon} title={itemRewardName(reward)} /></div>
-                      <div className="trophy-caption"><TrophyName name={itemRewardName(reward)} /></div>
-                      <button className="trophy-card-action" type="button" onClick={() => setSelectedItemReward(reward)} aria-label={`Получить «${itemRewardName(reward)}»`} />
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-          {ownedGroups.map((group) => (
+          {inventoryGroups.map((group) => (
             <section className={`trophy-rarity-section trophy-rarity-${group.rarity}`} key={group.rarity}>
               <header className="trophy-rarity-heading">
                 <span className="trophy-rarity-mark" aria-hidden="true" />
@@ -492,6 +483,16 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
                 <span className="trophy-rarity-line" aria-hidden="true" />
               </header>
               <div className="trophy-rarity-grid">
+                {group.rarity === 'common' && pendingItemRewards.map((reward) => {
+                  const icon = reward.item === 'bomb' ? '/assets/bomb.svg' : reward.item === 'ice' ? '/assets/ice.svg' : '/assets/exp.svg?v=2';
+                  return (
+                    <article className={`trophy-item trophy-item-${reward.item}`} key={`reward-${reward.rewardId}`}>
+                      <div className="trophy-card"><SinglePartTrophyCard icon={icon} title={itemRewardName(reward)} /></div>
+                      <div className="trophy-caption"><TrophyName name={itemRewardName(reward)} /></div>
+                      <button className="trophy-card-action" type="button" onClick={() => setSelectedItemReward(reward)} aria-label={`Получить «${itemRewardName(reward)}»`} />
+                    </article>
+                  );
+                })}
                 {group.trophies.map(({ trophy, collected }) => {
                   const completed = trophy.total > 1 && collected.size >= trophy.total;
                   const content = <>
@@ -537,20 +538,6 @@ export function GiftsScreen({ onBack, onOpenCatalog, prizes, pendingItemRewards,
       )}
       {ownedTrophies.length === 0 && pendingItemRewards.length === 0 && (
         <button className="gifts-catalog-link" onClick={onOpenCatalog}>Полный список доступных наград</button>
-      )}
-      {ownedTrophies.length === 0 && pendingItemRewards.length > 0 && (
-        <section className="gifts-inventory" aria-label="Полученные предметы">
-          <section className="trophy-rarity-section trophy-rarity-common">
-            <header className="trophy-rarity-heading"><span className="trophy-rarity-mark" aria-hidden="true" /><h2>Обычные</h2><span className="trophy-rarity-line" aria-hidden="true" /></header>
-            <div className="trophy-rarity-grid">
-              {pendingItemRewards.map((reward) => {
-                const icon = reward.item === 'bomb' ? '/assets/bomb.svg' : reward.item === 'ice' ? '/assets/ice.svg' : '/assets/exp.svg?v=2';
-                return <article className={`trophy-item trophy-item-${reward.item}`} key={reward.rewardId}><div className="trophy-card"><SinglePartTrophyCard icon={icon} title={itemRewardName(reward)} /></div><div className="trophy-caption"><TrophyName name={itemRewardName(reward)} /></div><button className="trophy-card-action" type="button" onClick={() => setSelectedItemReward(reward)} aria-label={`Получить «${itemRewardName(reward)}»`} /></article>;
-              })}
-            </div>
-          </section>
-          <button className="gifts-catalog-link gifts-catalog-link-flow" onClick={onOpenCatalog}>Полный список доступных наград</button>
-        </section>
       )}
       <button className="stats-back" onClick={onBack}>Назад</button>
       {selectedTrophy && <TrophyRewardDialog trophy={selectedTrophy} onClose={() => setSelectedTrophy(null)} />}

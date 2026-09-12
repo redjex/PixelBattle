@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getRewardSoundMode, setRewardSoundMode, type RewardSoundMode } from '../rewardSound';
 import { getTemplateOpacity, setTemplateOpacity, type TemplateOpacity } from '../templateOpacity';
 
@@ -16,6 +16,25 @@ const opacityOptions: TemplateOpacity[] = [20, 50, 100];
 export function SettingsScreen({ onBack }: Props) {
   const [soundMode, setSoundMode] = useState(getRewardSoundMode);
   const [opacity, setOpacity] = useState(getTemplateOpacity);
+  const [hideUsername, setHideUsername] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(true);
+
+  useEffect(() => {
+    const initData = window.Telegram?.WebApp?.initData;
+    if (!initData) { setPrivacyBusy(false); return; }
+    const controller = new AbortController();
+    const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
+    void fetch(`${apiUrl}/api/profiles/me/privacy`, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { 'X-Telegram-Init-Data': initData },
+    })
+      .then((response) => response.ok ? response.json() as Promise<{ hideUsername?: boolean }> : null)
+      .then((result) => { if (result) setHideUsername(Boolean(result.hideUsername)); })
+      .catch(() => undefined)
+      .finally(() => { if (!controller.signal.aborted) setPrivacyBusy(false); });
+    return () => controller.abort();
+  }, []);
 
   const selectSoundMode = (mode: RewardSoundMode) => {
     setRewardSoundMode(mode);
@@ -25,6 +44,29 @@ export function SettingsScreen({ onBack }: Props) {
   const selectOpacity = (value: TemplateOpacity) => {
     setTemplateOpacity(value);
     setOpacity(value);
+  };
+
+  const toggleUsernamePrivacy = async () => {
+    const initData = window.Telegram?.WebApp?.initData;
+    if (!initData || privacyBusy) return;
+    const nextValue = !hideUsername;
+    setPrivacyBusy(true);
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
+      const response = await fetch(`${apiUrl}/api/profiles/me/privacy`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initData },
+        body: JSON.stringify({ hideUsername: nextValue }),
+      });
+      if (!response.ok) return;
+      const result = await response.json() as { hideUsername?: boolean };
+      setHideUsername(Boolean(result.hideUsername));
+    } catch {
+      // Keep the previous value when the privacy setting cannot be saved.
+    } finally {
+      setPrivacyBusy(false);
+    }
   };
 
   return (
@@ -66,6 +108,19 @@ export function SettingsScreen({ onBack }: Props) {
               </button>
             ))}
           </div>
+        </section>
+        <section className="settings-group" aria-labelledby="privacy-title">
+          <h2 id="privacy-title">Приватность</h2>
+          <button
+            type="button"
+            className={`settings-sound-option${hideUsername ? ' selected' : ''}`}
+            aria-pressed={hideUsername}
+            disabled={privacyBusy}
+            onClick={() => void toggleUsernamePrivacy()}
+          >
+            <span className="settings-radio" aria-hidden="true" />
+            <span>Скрыть юзернейм</span>
+          </button>
         </section>
       </div>
       <button className="stats-back" onClick={onBack}>Назад</button>

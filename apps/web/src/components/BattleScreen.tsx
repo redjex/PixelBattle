@@ -14,7 +14,8 @@ const COLORS = [
 
 type PixelAuthor = NonNullable<Pixel['author']>;
 type Inventory = { bombs: number; ice: number; freezeRemaining: number };
-const profileCache = new Map<string, PixelAuthor>();
+const PROFILE_CACHE_MS = 5000;
+const profileCache = new Map<string, { profile: PixelAuthor; expiresAt: number }>();
 const profileRequests = new Map<string, Promise<PixelAuthor | null>>();
 const EMPTY_INVENTORY: Inventory = { bombs: 0, ice: 0, freezeRemaining: 0 };
 
@@ -92,12 +93,17 @@ export function BattleScreen({ online }: { online: number | null }) {
       return;
     }
     if (pixelAuthor.displayName || pixelAuthor.username) {
-      profileCache.set(pixelAuthor.id, pixelAuthor);
+      profileCache.set(pixelAuthor.id, { profile: pixelAuthor, expiresAt: Date.now() + PROFILE_CACHE_MS });
       setInspectedPixel(pixel);
       return;
     }
     const cached = profileCache.get(pixelAuthor.id);
-    setInspectedPixel(cached && pixel ? { ...pixel, author: cached } : pixel);
+    if (cached && cached.expiresAt > Date.now()) {
+      setInspectedPixel(pixel ? { ...pixel, author: cached.profile } : pixel);
+      return;
+    }
+    profileCache.delete(pixelAuthor.id);
+    setInspectedPixel(pixel);
   }, []);
 
   const setZoomImmediately = useCallback((value: number) => {
@@ -206,10 +212,11 @@ export function BattleScreen({ online }: { online: number | null }) {
     const author = inspectedPixel?.author;
     if (!author?.id || author.displayName) return;
     const cached = profileCache.get(author.id);
-    if (cached) {
-      setInspectedPixel((pixel) => pixel?.author?.id === author.id ? { ...pixel, author: cached } : pixel);
+    if (cached && cached.expiresAt > Date.now()) {
+      setInspectedPixel((pixel) => pixel?.author?.id === author.id ? { ...pixel, author: cached.profile } : pixel);
       return;
     }
+    profileCache.delete(author.id);
     const initData = window.Telegram?.WebApp?.initData;
     if (!initData) return;
     const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
@@ -220,10 +227,12 @@ export function BattleScreen({ online }: { online: number | null }) {
         cache: 'no-store',
         headers: { 'X-Telegram-Init-Data': initData },
       })
-        .then((response) => response.ok ? response.json() as Promise<PixelAuthor> : null)
+        .then((response) => response.ok ? response.json() as Promise<Omit<PixelAuthor, 'id'>> : null)
         .then((profile) => {
-          if (profile) profileCache.set(author.id, profile);
-          return profile;
+          if (!profile) return null;
+          const publicProfile: PixelAuthor = { ...profile, id: author.id };
+          profileCache.set(author.id, { profile: publicProfile, expiresAt: Date.now() + PROFILE_CACHE_MS });
+          return publicProfile;
         })
         .catch((error: unknown) => {
           console.error('Failed to preload profile', error);
@@ -295,11 +304,12 @@ export function BattleScreen({ online }: { online: number | null }) {
         setCooldownUntil(Date.now() + retryAfter * 1000);
         return;
       }
-      const result = await response.json() as { inventory?: Inventory };
+      const result = await response.json() as { inventory?: Inventory; cooldownMs?: number };
       if (result.inventory) setInventory(result.inventory);
       if (response.ok) {
         setItemMode(null);
-        if (placementCooldownMs > 0) setCooldownUntil(Date.now() + placementCooldownMs);
+        const cooldownMs = Math.max(0, result.cooldownMs ?? placementCooldownMs);
+        if (cooldownMs > 0) setCooldownUntil(Date.now() + cooldownMs);
         window.dispatchEvent(new Event('pixelbattle:placement-accepted'));
       }
     } catch { /* Session refresh will restore the inventory. */ }
@@ -361,8 +371,9 @@ export function BattleScreen({ online }: { online: number | null }) {
         }}
         onInspectPixel={inspectPixel}
         cooldownUntil={cooldownUntil}
-        onPlacementAccepted={() => {
-          if (placementCooldownMs > 0) setCooldownUntil(Date.now() + placementCooldownMs);
+        onPlacementAccepted={(serverCooldownMs) => {
+          const cooldownMs = Math.max(0, serverCooldownMs ?? placementCooldownMs);
+          if (cooldownMs > 0) setCooldownUntil(Date.now() + cooldownMs);
           if (itemMode === 'ice') {
             const nextRemaining = Math.max(0, inventory.freezeRemaining - 1);
             setInventory((current) => ({ ...current, freezeRemaining: nextRemaining }));
@@ -414,10 +425,10 @@ export function BattleScreen({ online }: { online: number | null }) {
                 : <span className="pixel-owner-name">{authorLabel}</span>}
               <span className="pixel-owner-balance" aria-hidden="true" />
             </div>}
-            <button className={`pixel-item-button${itemMode === 'bomb' ? ' selected' : ''}`} onClick={() => setItemMode((current) => current === 'bomb' ? null : 'bomb')} disabled={itemBusy !== null || paused || inventory.bombs <= 0} aria-label="Выбрать бомбу" aria-pressed={itemMode === 'bomb'}>
+            <button className={`pixel-item-button${itemMode === 'bomb' ? ' selected' : ''}`} onClick={() => setItemMode((current) => current === 'bomb' ? null : 'bomb')} disabled={itemBusy !== null || paused || inventory.bombs <= 0 || cooldownSeconds > 0} aria-label="Выбрать бомбу" aria-pressed={itemMode === 'bomb'}>
               <img src="/assets/bomb.svg" alt="" /><span>{inventory.bombs}</span>
             </button>
-            <button className={`pixel-item-button${itemMode === 'ice' ? ' selected' : ''}`} onClick={() => setItemMode((current) => current === 'ice' ? null : 'ice')} disabled={itemBusy !== null || (inventory.ice <= 0 && inventory.freezeRemaining <= 0)} aria-label="Выбрать заморозку" aria-pressed={itemMode === 'ice'}>
+            <button className={`pixel-item-button${itemMode === 'ice' ? ' selected' : ''}`} onClick={() => setItemMode((current) => current === 'ice' ? null : 'ice')} disabled={itemBusy !== null || paused || (inventory.ice <= 0 && inventory.freezeRemaining <= 0) || cooldownSeconds > 0} aria-label="Выбрать заморозку" aria-pressed={itemMode === 'ice'}>
               <img src="/assets/ice.svg" alt="" /><span>{inventory.ice}</span>
             </button>
           </div>

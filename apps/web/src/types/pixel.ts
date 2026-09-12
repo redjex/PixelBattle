@@ -13,6 +13,7 @@ export type Pixel = {
   operationId?: string;
   author?: PixelAuthor;
   frozenUntil?: string;
+  cooldownMs?: number;
 };
 
 export type PlacementMessage = Pixel & {

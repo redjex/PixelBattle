@@ -141,8 +141,13 @@ func TestSecurityMiddleware(t *testing.T) {
 		{"resize requires put", "POST", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 405},
 		{"resize put", "PUT", "/api/admin/boards/main/size", `{}`, "Bearer secret", false, 204},
 		{"get only", "POST", "/api/profiles/123", "", "", false, 405},
+		{"privacy requires auth", "GET", "/api/profiles/me/privacy", "", "", false, 401},
+		{"privacy update requires auth", "PUT", "/api/profiles/me/privacy", `{\"hideUsername\":true}`, "", false, 401},
+		{"privacy rejects post", "POST", "/api/profiles/me/privacy", `{}`, "", false, 405},
 		{"trophy reward requires get", "POST", "/api/boards/trophies/yng-explrz/reward", `{}`, "", false, 405},
 		{"trophy reward requires auth", "GET", "/api/boards/trophies/yng-explrz/reward", "", "", false, 401},
+		{"trophy request requires post", "GET", "/api/boards/trophies/bear/request", "", "", false, 405},
+		{"trophy request requires auth", "POST", "/api/boards/trophies/bear/request", `{}`, "", false, 401},
 		{"no implicit head", "HEAD", "/health", "", "", false, 405},
 		{"unknown route", "POST", "/unknown", "", "", false, 404},
 		{"auth before body", "POST", "/api/boards/main/pixels", `{}`, "", false, 401},
@@ -332,6 +337,28 @@ func TestTrophyAwardEventOnlyExposesNicknameAndText(t *testing.T) {
 	for _, forbidden := range []string{"eventId", "userId", "trophyId", "trophyName", "completed"} {
 		if _, exists := payload[forbidden]; exists {
 			t.Fatalf("private trophy field %q leaked: %s", forbidden, data)
+		}
+	}
+}
+
+func TestHiddenUsernameProfileOnlyExposesNameAndAvatar(t *testing.T) {
+	profile := profileForClient(domain.PixelAuthor{
+		ID: "123", DisplayName: "Player", Username: "secret", PhotoURL: "https://example.com/avatar.jpg", HideUsername: true,
+	})
+	data, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 2 || payload["displayName"] != "Player" || payload["photoUrl"] != "https://example.com/avatar.jpg" {
+		t.Fatalf("unexpected hidden profile payload: %s", data)
+	}
+	for _, forbidden := range []string{"id", "username", "telegramId"} {
+		if _, exists := payload[forbidden]; exists {
+			t.Fatalf("private profile field %q leaked: %s", forbidden, data)
 		}
 	}
 }

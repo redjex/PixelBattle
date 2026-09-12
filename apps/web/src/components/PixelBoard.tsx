@@ -19,7 +19,7 @@ const normalizeBoardColor = (color: string) => color.toUpperCase() === '#F8F9FA'
 
 type TemplateState = { image: HTMLImageElement; canvas: HTMLCanvasElement; x: number; y: number; width: number; height: number };
 type TemplateGesture = { mode: 'move' | 'resize'; pointerId: number; startClientX: number; startClientY: number; startX: number; startY: number; startWidth: number; startHeight: number };
-type Props = { color: string; zoom: number; onZoom: (zoom: number) => void; eyedropper: boolean; onPickColor: (color: string) => void; onEyedropperEnd: () => void; paintNonce: number; useIce: boolean; onSelectPixel: (pixel: { x: number; y: number } | null) => void; onInspectPixel: (pixel: Pixel | null) => void; cooldownUntil: number; onPlacementAccepted: () => void; templateImageUrl: string | null; templatePlacement: TemplatePlacement | null; templateOpacity: number; onTemplatePlacementChange: (placement: TemplatePlacement) => void };
+type Props = { color: string; zoom: number; onZoom: (zoom: number) => void; eyedropper: boolean; onPickColor: (color: string) => void; onEyedropperEnd: () => void; paintNonce: number; useIce: boolean; onSelectPixel: (pixel: { x: number; y: number } | null) => void; onInspectPixel: (pixel: Pixel | null) => void; cooldownUntil: number; onPlacementAccepted: (cooldownMs?: number) => void; templateImageUrl: string | null; templatePlacement: TemplatePlacement | null; templateOpacity: number; onTemplatePlacementChange: (placement: TemplatePlacement) => void };
 
 function renderTemplate(image: HTMLImageElement, width: number, height: number) {
   const canvas = document.createElement('canvas');
@@ -246,7 +246,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     void place({ ...pixel, type: 'place_pixel', boardId: 'main', operationId: crypto.randomUUID(), useIce })
       .then((acceptedPixel) => {
         if (!acceptedPixel) return;
-        onPlacementAccepted();
+        onPlacementAccepted(acceptedPixel.cooldownMs);
         const currentSelection = selectedRef.current;
         if (currentSelection?.x === acceptedPixel.x && currentSelection.y === acceptedPixel.y) onInspectPixel(acceptedPixel);
       });

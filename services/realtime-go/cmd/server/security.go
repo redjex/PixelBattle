@@ -173,7 +173,7 @@ func allowedMethods(path string) string {
 		return "GET"
 	case "/api/boards/main/rewards", "/api/boards/captcha", "/api/admin/trophies/drop":
 		return "GET, POST"
-	case "/api/admin/boards/main/size", "/api/admin/game/pause", "/api/admin/game/test-mode":
+	case "/api/admin/boards/main/size", "/api/admin/game/pause", "/api/admin/game/test-mode", "/api/profiles/me/privacy":
 		return "GET, PUT"
 	case "/api/boards/main/pixels", "/api/boards/items/ice/activate", "/api/boards/items/bomb/use", "/api/admin/boards/main/fill", "/api/admin/boards/main/image", "/api/admin/boards/main/clear", "/api/admin/boards/main/restore", "/api/admin/quests/reset", "/api/admin/items/grant", "/api/admin/trophies/reset", "/api/admin/captcha/require", "/api/admin/trophy-reward-requests/ack", "/api/admin/recording/start", "/api/admin/recording/stop", "/api/admin/reset-all":
 		return "POST"
@@ -186,6 +186,9 @@ func allowedMethods(path string) string {
 	}
 	if strings.HasPrefix(path, "/api/boards/trophies/") && strings.HasSuffix(path, "/reward") {
 		return "GET"
+	}
+	if strings.HasPrefix(path, "/api/boards/trophies/") && strings.HasSuffix(path, "/request") {
+		return "POST"
 	}
 	return ""
 }

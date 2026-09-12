@@ -28,10 +28,11 @@ type PixelEvent struct {
 }
 
 type PixelAuthor struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName"`
-	Username    string `json:"username,omitempty"`
-	PhotoURL    string `json:"photoUrl,omitempty"`
+	ID           string `json:"id"`
+	DisplayName  string `json:"displayName"`
+	Username     string `json:"username,omitempty"`
+	PhotoURL     string `json:"photoUrl,omitempty"`
+	HideUsername bool   `json:"-"`
 }
 
 type BoardPixel struct {

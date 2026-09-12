@@ -424,8 +424,13 @@ func main() {
 	})
 	http.HandleFunc("/api/boards/trophies/", func(w http.ResponseWriter, r *http.Request) {
 		const prefix = "/api/boards/trophies/"
-		const suffix = "/reward"
-		if !strings.HasSuffix(r.URL.Path, suffix) {
+		const rewardSuffix = "/reward"
+		const requestSuffix = "/request"
+		isRewardRequest := strings.HasSuffix(r.URL.Path, requestSuffix)
+		suffix := rewardSuffix
+		if isRewardRequest {
+			suffix = requestSuffix
+		} else if !strings.HasSuffix(r.URL.Path, rewardSuffix) {
 			http.NotFound(w, r)
 			return
 		}
@@ -465,12 +470,21 @@ func main() {
 			http.Error(w, "reward is unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if source := trophyRewardRequestSource(trophyID); source != "" {
-			if _, requestErr := writer.RecordTrophyRewardRequest(r.Context(), identity, trophyID, trophyRewardName(trophyID), source); requestErr != nil {
+		if isRewardRequest {
+			source := trophyRewardRequestSource(trophyID)
+			if source == "" {
+				http.NotFound(w, r)
+				return
+			}
+			created, requestErr := writer.RecordTrophyRewardRequest(r.Context(), identity, trophyID, trophyRewardName(trophyID), source)
+			if requestErr != nil {
 				log.Printf("trophy reward request failed: user=%s trophy=%s: %v", identity, trophyID, requestErr)
 				http.Error(w, "reward request is unavailable", http.StatusServiceUnavailable)
 				return
 			}
+			w.Header().Set("Cache-Control", "no-store")
+			writeJSON(w, map[string]any{"requested": true, "created": created})
+			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, reward)
@@ -594,6 +608,7 @@ func main() {
 		payload, _ := json.Marshal(publicEvent)
 		hub.Broadcast(payload)
 		publicEvent.CaptchaRequired = captchaRequired
+		publicEvent.CooldownMs = userCooldown.Milliseconds()
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, publicEvent)
 	})
@@ -692,7 +707,7 @@ func main() {
 		captchaGuard.RecordPlacement(identity, now, userCooldown)
 		awardDueTrophy(r.Context(), identity, author)
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory})
+		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory, "cooldownMs": userCooldown.Milliseconds()})
 	})
 	statsHandler := func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -723,6 +738,42 @@ func main() {
 	}
 	http.HandleFunc("/api/boards/main/stats", statsHandler)
 	http.HandleFunc("/api/profiles/me", statsHandler)
+	http.HandleFunc("/api/profiles/me/privacy", func(w http.ResponseWriter, r *http.Request) {
+		telegramUser, err := telegramUserFromRequest(r)
+		if err != nil {
+			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		if err := writer.UpsertProfile(r.Context(), profileFromTelegram(telegramUser)); err != nil {
+			http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if r.Method == http.MethodPut {
+			var request struct {
+				HideUsername *bool `json:"hideUsername"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.HideUsername == nil {
+				http.Error(w, "invalid privacy settings", http.StatusBadRequest)
+				return
+			}
+			if err := writer.SetProfileHideUsername(r.Context(), identity, *request.HideUsername); err != nil {
+				http.Error(w, "failed to save privacy settings", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		profile, err := writer.Profile(r.Context(), identity)
+		if err != nil {
+			http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, map[string]bool{"hideUsername": profile.HideUsername})
+	})
 	profileHandler := func(w http.ResponseWriter, r *http.Request) {
 		if _, err := telegramUserFromRequest(r); err != nil {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
@@ -744,7 +795,7 @@ func main() {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, profile)
+		writeJSON(w, profileForClient(profile))
 	}
 	http.HandleFunc("/api/profiles/", profileHandler)
 	http.HandleFunc("/api/boards/profiles/", profileHandler)
@@ -1744,11 +1795,26 @@ type publicPixelEvent struct {
 	Author          publicPixelAuthor `json:"author"`
 	FrozenUntil     *time.Time        `json:"frozenUntil,omitempty"`
 	CaptchaRequired bool              `json:"captchaRequired,omitempty"`
+	CooldownMs      int64             `json:"cooldownMs,omitempty"`
 }
 
 type trophyAwardEvent struct {
 	Nickname string `json:"nickname"`
 	Text     string `json:"text"`
+}
+
+type publicProfile struct {
+	DisplayName string `json:"displayName"`
+	Username    string `json:"username,omitempty"`
+	PhotoURL    string `json:"photoUrl,omitempty"`
+}
+
+func profileForClient(profile domain.PixelAuthor) publicProfile {
+	result := publicProfile{DisplayName: profile.DisplayName, PhotoURL: profile.PhotoURL}
+	if !profile.HideUsername {
+		result.Username = profile.Username
+	}
+	return result
 }
 
 func trophyRewardRequestSource(trophyID string) string {
