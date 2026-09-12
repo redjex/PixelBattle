@@ -234,6 +234,11 @@ CREATE TABLE IF NOT EXISTS trophy_winners (
  completed_at timestamptz NOT NULL DEFAULT NOW(),
  PRIMARY KEY (trophy_id,user_id)
 );
+CREATE TABLE IF NOT EXISTS trophy_chat_notifications (
+ notification_id text PRIMARY KEY,
+ notified_at timestamptz NOT NULL DEFAULT NOW(),
+ CHECK (notification_id <> '')
+);
 CREATE TABLE IF NOT EXISTS trophy_reward_assignments (
  user_id text NOT NULL,
  trophy_id text NOT NULL,
@@ -598,6 +603,86 @@ type TrophyRewardRequest struct {
 	TrophyName  string    `json:"trophyName"`
 	Source      string    `json:"source"`
 	RequestedAt time.Time `json:"requestedAt"`
+}
+
+type TrophyChatNotification struct {
+	NotificationID string    `json:"notificationId"`
+	UserID         string    `json:"userId"`
+	DisplayName    string    `json:"displayName"`
+	Username       string    `json:"username,omitempty"`
+	TrophyID       string    `json:"trophyId"`
+	TrophyName     string    `json:"trophyName"`
+	CompletedAt    time.Time `json:"completedAt"`
+}
+
+func (w *Writer) PendingTrophyChatNotifications(ctx context.Context, limit int) ([]TrophyChatNotification, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	rows, err := w.pool.Query(ctx, `
+WITH trophy_events AS (
+  SELECT 'winner:'||winners.trophy_id||':'||winners.user_id AS notification_id,
+         winners.user_id,
+         winners.trophy_id,
+         COALESCE((
+           SELECT prize->>'name'
+           FROM jsonb_array_elements(profiles.prizes) AS prize
+           WHERE prize->>'id'=winners.trophy_id
+           LIMIT 1
+         ), winners.trophy_id) AS trophy_name,
+         winners.completed_at,
+         profiles.display_name,
+         CASE WHEN profiles.hide_username THEN '' ELSE profiles.username END AS username
+  FROM trophy_winners AS winners
+  JOIN profiles ON profiles.telegram_id=winners.user_id
+  WHERE winners.trophy_id NOT IN ('experience','bomb','ice')
+  UNION ALL
+  SELECT 'claim:'||claims.claim_id,
+         claims.user_id,
+         claims.trophy_id,
+         CASE claims.trophy_id
+           WHEN 'experience' THEN 'Опыт +100'
+           WHEN 'bomb' THEN 'Бомбы ×5'
+           WHEN 'ice' THEN 'Заморозки ×5'
+           ELSE claims.trophy_id
+         END,
+         claims.awarded_at,
+         profiles.display_name,
+         CASE WHEN profiles.hide_username THEN '' ELSE profiles.username END
+  FROM trophy_reward_claims AS claims
+  JOIN profiles ON profiles.telegram_id=claims.user_id
+)
+SELECT events.notification_id,
+       events.user_id,
+       events.display_name,
+       events.username,
+       events.trophy_id,
+       events.trophy_name,
+       events.completed_at
+FROM trophy_events AS events
+LEFT JOIN trophy_chat_notifications AS sent
+  ON sent.notification_id=events.notification_id
+WHERE sent.notification_id IS NULL
+ORDER BY events.completed_at,events.notification_id
+LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	notifications := make([]TrophyChatNotification, 0)
+	for rows.Next() {
+		var notification TrophyChatNotification
+		if err := rows.Scan(&notification.NotificationID, &notification.UserID, &notification.DisplayName, &notification.Username, &notification.TrophyID, &notification.TrophyName, &notification.CompletedAt); err != nil {
+			return nil, err
+		}
+		notifications = append(notifications, notification)
+	}
+	return notifications, rows.Err()
+}
+
+func (w *Writer) MarkTrophyChatNotificationSent(ctx context.Context, notificationID string) error {
+	_, err := w.pool.Exec(ctx, `INSERT INTO trophy_chat_notifications(notification_id) VALUES($1) ON CONFLICT DO NOTHING`, notificationID)
+	return err
 }
 
 func (w *Writer) TrophyCompleted(ctx context.Context, userID, trophyID string) (bool, error) {

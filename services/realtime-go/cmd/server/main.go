@@ -1110,6 +1110,55 @@ func main() {
 		}
 		writeJSON(w, map[string]any{"players": captchaGuard.ReviewStatuses(time.Now().UTC())})
 	})
+	http.HandleFunc("/api/admin/trophy-chat-notifications", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "notifications unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		notifications, err := writer.PendingTrophyChatNotifications(r.Context(), limit)
+		if err != nil {
+			log.Printf("trophy chat notification load failed: %v", err)
+			http.Error(w, "notifications unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]any{"notifications": notifications})
+	})
+	http.HandleFunc("/api/admin/trophy-chat-notifications/ack", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if writer == nil {
+			http.Error(w, "notifications unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		var request struct {
+			NotificationID string `json:"notificationId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.NotificationID == "" || len(request.NotificationID) > 256 {
+			http.Error(w, "invalid notification", http.StatusBadRequest)
+			return
+		}
+		if err := writer.MarkTrophyChatNotificationSent(r.Context(), request.NotificationID); err != nil {
+			log.Printf("trophy chat notification ack failed: notification=%s: %v", request.NotificationID, err)
+			http.Error(w, "notifications unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	})
 	http.HandleFunc("/api/admin/trophy-reward-requests", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
 			http.Error(w, "admin access required", http.StatusUnauthorized)

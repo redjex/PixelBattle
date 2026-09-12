@@ -215,3 +215,72 @@ def test_loop_does_not_log_url(capsys):
     output = capsys.readouterr().out
     assert "SECRET" not in output
     assert "failed" in output
+
+
+def test_trophy_topic_is_created_once_and_cached():
+    with patch.object(bot.database, "get", return_value=None), patch.object(
+        bot.database, "set"
+    ) as cache, patch.object(
+        bot,
+        "call",
+        side_effect=[
+            {"result": {"is_forum": True}},
+            {"result": {"message_thread_id": 77}},
+        ],
+    ) as call:
+        assert bot.trophy_topic_id() == 77
+    assert call.call_args_list[0].args == (
+        "getChat",
+        {"chat_id": bot.TROPHY_ALERT_CHAT_ID},
+    )
+    assert call.call_args_list[1].args == (
+        "createForumTopic",
+        {"chat_id": bot.TROPHY_ALERT_CHAT_ID, "name": "Трофеи"},
+    )
+    cache.assert_called_once_with(bot.TROPHY_TOPIC_KEY, "77")
+
+
+def test_trophy_topic_is_not_created_until_topics_are_enabled():
+    with patch.object(bot.database, "get", return_value=None), patch.object(
+        bot, "call", return_value={"result": {"is_forum": False}}
+    ) as call:
+        try:
+            bot.trophy_topic_id()
+            assert False, "non-forum chat must be rejected"
+        except RuntimeError:
+            pass
+    call.assert_called_once_with("getChat", {"chat_id": bot.TROPHY_ALERT_CHAT_ID})
+
+
+def test_trophy_notification_sends_photo_to_topic_and_acknowledges():
+    notification = {
+        "notificationId": "winner:bear-redjex:789",
+        "userId": "789",
+        "displayName": "Игрок",
+        "username": "player",
+        "trophyId": "bear-redjex",
+        "trophyName": "Мишка от redjex",
+        "completedAt": "2026-09-12T12:34:00Z",
+    }
+    response = Mock()
+    with patch.object(
+        bot, "fetch_trophy_chat_notifications", return_value=[notification]
+    ), patch.object(bot, "trophy_topic_id", return_value=77), patch.object(
+        bot, "call"
+    ) as call, patch.object(
+        bot, "realtime_request", return_value=response
+    ) as realtime, patch.object(bot.time, "sleep"):
+        bot.notify_trophy_chat()
+
+    method, payload = call.call_args.args
+    assert method == "sendPhoto"
+    assert payload["message_thread_id"] == 77
+    assert payload["photo"].endswith("/assets/trophies/bear-redjex.png?v=1")
+    assert "Игрок (@player)" in payload["caption"]
+    assert "12.09.2026 в 17:34 (UTC+5)" in payload["caption"]
+    realtime.assert_called_once_with(
+        "POST",
+        "/api/admin/trophy-chat-notifications/ack",
+        json={"notificationId": "winner:bear-redjex:789"},
+    )
+    response.raise_for_status.assert_called_once()

@@ -5,7 +5,7 @@ import threading
 import time
 import colorsys
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import redis
@@ -65,6 +65,32 @@ CAPTCHA_NOTIFICATION_POLL_SECONDS = 5
 CAPTCHA_SUSPICION_GRACE_SECONDS = 60
 CAPTCHA_ALERT_CHAT_ID = int(os.getenv("CAPTCHA_ALERT_CHAT_ID", "-1004326871238"))
 REWARD_REQUEST_POLL_SECONDS = 5
+TROPHY_ALERT_CHAT_ID = int(os.getenv("TROPHY_ALERT_CHAT_ID", str(CAPTCHA_ALERT_CHAT_ID)))
+TROPHY_TOPIC_NAME = os.getenv("TROPHY_TOPIC_NAME", "Трофеи").strip() or "Трофеи"
+TROPHY_NOTIFICATION_INTERVAL_SECONDS = float(
+    os.getenv("TROPHY_NOTIFICATION_INTERVAL_SECONDS", "3.5")
+)
+if TROPHY_NOTIFICATION_INTERVAL_SECONDS < 3:
+    raise RuntimeError("TROPHY_NOTIFICATION_INTERVAL_SECONDS must be at least 3")
+TROPHY_NOTIFICATION_POLL_SECONDS = 5
+TROPHY_TOPIC_KEY = f"pixelbattle:trophies:topic:{TROPHY_ALERT_CHAT_ID}"
+TROPHY_IMAGE_PATHS = {
+    "experience": "/assets/trophy-notifications/experience.png",
+    "bomb": "/assets/trophy-notifications/bomb.png",
+    "ice": "/assets/trophy-notifications/ice.png",
+    "yng-explrz": "/assets/trophy-notifications/yng-explrz.png",
+    "besigned": "/assets/trophy-notifications/besigned.png",
+    "stickers": "/assets/trophy-notifications/stickers.png",
+    "stikidbot": "/assets/trophies/mars.png?v=1",
+    "stashvpn": "/assets/trophies/stash.png?v=1",
+    "bear": "/assets/trophy-notifications/bear.png",
+    "bear-redjex": "/assets/trophies/bear-redjex.png?v=1",
+    "liberty-figure-252202": "/assets/trophies/png/5.png",
+    "candy-cane-162605": "/assets/trophies/png/6.png",
+    "vice-cream-227533": "/assets/trophies/png/7.png",
+    "vice-cream-428029": "/assets/trophies/png/8.png",
+    "chill-flame-303522": "/assets/trophies/png/9.png",
+}
 
 FILL_COLORS = [
     "#FF8080",
@@ -106,6 +132,12 @@ pending_actions: dict[tuple[int, int], Any] = {}
 pending_prompt_messages: dict[tuple[int, int], int] = {}
 
 
+class TelegramAPIError(RuntimeError):
+    def __init__(self, retry_after: float = 0) -> None:
+        super().__init__("Telegram request failed")
+        self.retry_after = retry_after
+
+
 def call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     response = requests.post(f"{API}/{method}", json=payload, timeout=40)
     try:
@@ -113,7 +145,9 @@ def call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     except ValueError as exc:
         raise RuntimeError("Telegram returned an invalid response") from None
     if not response.ok or not result.get("ok"):
-        raise RuntimeError("Telegram request failed")
+        parameters = result.get("parameters", {})
+        retry_after = parameters.get("retry_after", 0) if isinstance(parameters, dict) else 0
+        raise TelegramAPIError(float(retry_after) if retry_after else 0)
     return result
 
 
@@ -651,6 +685,113 @@ def trophy_reward_notification_loop() -> None:
         except Exception as exc:
             print(f"trophy reward notification loop error: {type(exc).__name__}", flush=True)
         time.sleep(REWARD_REQUEST_POLL_SECONDS)
+
+
+def trophy_topic_id() -> int:
+    cached = database.get(TROPHY_TOPIC_KEY)
+    if cached and str(cached).isdigit():
+        return int(cached)
+    chat = call("getChat", {"chat_id": TROPHY_ALERT_CHAT_ID}).get("result", {})
+    if not chat.get("is_forum"):
+        raise RuntimeError("Trophy notification chat is not a forum")
+    result = call(
+        "createForumTopic",
+        {"chat_id": TROPHY_ALERT_CHAT_ID, "name": TROPHY_TOPIC_NAME},
+    )
+    topic_id = result.get("result", {}).get("message_thread_id")
+    if not isinstance(topic_id, int) or topic_id <= 0:
+        raise RuntimeError("Telegram returned an invalid forum topic")
+    database.set(TROPHY_TOPIC_KEY, str(topic_id))
+    print(
+        f"trophy forum topic created: chat={TROPHY_ALERT_CHAT_ID} topic={topic_id}",
+        flush=True,
+    )
+    return topic_id
+
+
+def fetch_trophy_chat_notifications() -> list[dict[str, Any]]:
+    response = realtime_request(
+        "GET", "/api/admin/trophy-chat-notifications?limit=20"
+    )
+    response.raise_for_status()
+    payload = response.json()
+    notifications = payload.get("notifications", []) if isinstance(payload, dict) else []
+    return notifications if isinstance(notifications, list) else []
+
+
+def trophy_completed_time(value: str) -> str:
+    try:
+        completed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        local = completed.astimezone(timezone(timedelta(hours=5)))
+        return local.strftime("%d.%m.%Y в %H:%M (UTC+5)")
+    except (ValueError, OSError, OverflowError):
+        return value
+
+
+def trophy_notification_caption(notification: dict[str, Any]) -> str:
+    display_name = str(notification.get("displayName", "")).strip()
+    username = str(notification.get("username", "")).strip().lstrip("@")
+    player = display_name or "Игрок"
+    if username:
+        player = f"{player} (@{username})"
+    trophy_name = str(notification.get("trophyName", "Трофей")).strip() or "Трофей"
+    completed_at = trophy_completed_time(str(notification.get("completedAt", "")))
+    return f"🏆 {trophy_name}\nПолучил: {player}\nВремя: {completed_at}"
+
+
+def notify_trophy_chat() -> None:
+    notifications = fetch_trophy_chat_notifications()
+    if not notifications:
+        return
+    topic_id = trophy_topic_id()
+    for notification in notifications:
+        if not isinstance(notification, dict):
+            continue
+        notification_id = str(notification.get("notificationId", ""))
+        trophy_id = str(notification.get("trophyId", ""))
+        user_id = str(notification.get("userId", ""))
+        if not notification_id or not trophy_id or not user_id:
+            continue
+        image_path = TROPHY_IMAGE_PATHS.get(trophy_id, "/assets/main.png")
+        try:
+            call(
+                "sendPhoto",
+                {
+                    "chat_id": TROPHY_ALERT_CHAT_ID,
+                    "message_thread_id": topic_id,
+                    "photo": f"{APP_URL}{image_path}",
+                    "caption": trophy_notification_caption(notification),
+                },
+            )
+            response = realtime_request(
+                "POST",
+                "/api/admin/trophy-chat-notifications/ack",
+                json={"notificationId": notification_id},
+            )
+            response.raise_for_status()
+            print(
+                f"trophy chat notification sent: trophy={trophy_id} user={user_id}",
+                flush=True,
+            )
+        except TelegramAPIError as exc:
+            if exc.retry_after:
+                time.sleep(exc.retry_after + 1)
+            raise
+        time.sleep(TROPHY_NOTIFICATION_INTERVAL_SECONDS)
+
+
+def trophy_chat_notification_loop() -> None:
+    while True:
+        retry_delay = TROPHY_NOTIFICATION_POLL_SECONDS
+        try:
+            notify_trophy_chat()
+        except (RuntimeError, requests.RequestException) as exc:
+            print(
+                f"trophy chat notification loop error: {type(exc).__name__}",
+                flush=True,
+            )
+            retry_delay = 300
+        time.sleep(retry_delay)
 
 
 def render_map() -> bytes:
@@ -1680,6 +1821,11 @@ def main() -> None:
         threading.Thread(
             target=trophy_reward_notification_loop,
             name="trophy-reward-admin-notifications",
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=trophy_chat_notification_loop,
+            name="trophy-chat-notifications",
             daemon=True,
         ).start()
     offset = 0
