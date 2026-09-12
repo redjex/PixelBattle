@@ -454,9 +454,24 @@ func main() {
 			return
 		}
 		identity := strconv.FormatInt(telegramUser.ID, 10)
-		reward, err := writer.ClaimTrophyReward(r.Context(), identity, trophyID, string(kind), func() ([]string, error) {
-			return trophyRewardCatalog.Entries(trophyID)
-		})
+		var reward persistence.TrophyReward
+		if kind == trophyrewards.KindRequest {
+			completed, completedErr := writer.TrophyCompleted(r.Context(), identity, trophyID)
+			if completedErr != nil {
+				log.Printf("trophy completion check failed: user=%s trophy=%s: %v", identity, trophyID, completedErr)
+				http.Error(w, "reward is unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if !completed {
+				http.Error(w, "trophy is not completed", http.StatusForbidden)
+				return
+			}
+			reward = persistence.TrophyReward{TrophyID: trophyID, Kind: string(kind)}
+		} else {
+			reward, err = writer.ClaimTrophyReward(r.Context(), identity, trophyID, string(kind), func() ([]string, error) {
+				return trophyRewardCatalog.Entries(trophyID)
+			})
+		}
 		if errors.Is(err, persistence.ErrTrophyNotCompleted) {
 			http.Error(w, "trophy is not completed", http.StatusForbidden)
 			return

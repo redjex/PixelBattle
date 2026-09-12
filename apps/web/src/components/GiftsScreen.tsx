@@ -13,7 +13,7 @@ type CatalogProps = { onBack: () => void; prizes: unknown[]; soldOutTrophies: st
 
 type TrophyReward = {
   trophyId: string;
-  kind: 'code' | 'url';
+  kind: 'code' | 'url' | 'request';
   value: string;
 };
 
@@ -297,6 +297,8 @@ function TrophyRewardDialog({ trophy, onClose }: { trophy: TrophyDefinition; onC
   const [reward, setReward] = useState<TrophyReward | null>(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  const [requested, setRequested] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -328,7 +330,8 @@ function TrophyRewardDialog({ trophy, onClose }: { trophy: TrophyDefinition; onC
       const payload = await response.json() as Partial<TrophyReward>;
       const validCode = payload.kind === 'code' && typeof payload.value === 'string' && payload.value.length > 0;
       const validURL = payload.kind === 'url' && typeof payload.value === 'string' && payload.value.startsWith('https://');
-      if (payload.trophyId !== trophy.id || (!validCode && !validURL)) throw new Error('Сервер вернул неверную награду');
+      const validRequest = payload.kind === 'request';
+      if (payload.trophyId !== trophy.id || (!validCode && !validURL && !validRequest)) throw new Error('Сервер вернул неверную награду');
       const validatedReward = payload as TrophyReward;
       trophyRewardCache.set(cacheKey, validatedReward);
       setReward(validatedReward);
@@ -362,6 +365,30 @@ function TrophyRewardDialog({ trophy, onClose }: { trophy: TrophyDefinition; onC
     }).catch(() => undefined);
   };
 
+  const submitRewardRequest = async () => {
+    const initData = window.Telegram?.WebApp?.initData;
+    if (!initData || requesting || requested) return;
+    setRequesting(true);
+    setError('');
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
+      const response = await fetch(`${apiUrl}/api/boards/trophies/${encodeURIComponent(trophy.id)}/request`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'X-Telegram-Init-Data': initData },
+      });
+      if (!response.ok) throw new Error('Не удалось отправить заявку. Попробуйте ещё раз');
+      const result = await response.json() as { requested?: boolean };
+      if (!result.requested) throw new Error('Сервер не подтвердил заявку');
+      setRequested(true);
+      window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('success');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Не удалось отправить заявку');
+    } finally {
+      setRequesting(false);
+    }
+  };
+
   return (
     <div className="trophy-reward-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="trophy-reward-dialog" role="dialog" aria-modal="true" aria-labelledby="trophy-reward-title">
@@ -381,6 +408,11 @@ function TrophyRewardDialog({ trophy, onClose }: { trophy: TrophyDefinition; onC
         )}
         {reward?.kind === 'url' && (
           <a className="trophy-reward-get" href={reward.value} target="_blank" rel="noreferrer" onClick={notifyRewardRequest}>Получить</a>
+        )}
+        {reward?.kind === 'request' && (
+          <button className="trophy-reward-get" type="button" disabled={requesting || requested} onClick={() => void submitRewardRequest()}>
+            {requested ? 'Заявка отправлена' : requesting ? 'Отправляем…' : 'Получить'}
+          </button>
         )}
         {reward && trophy.id === 'stashvpn' && (
           <a className="trophy-reward-get" href="https://t.me/StashNetBot" target="_blank" rel="noreferrer">Открыть бота</a>

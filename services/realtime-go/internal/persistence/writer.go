@@ -600,6 +600,30 @@ type TrophyRewardRequest struct {
 	RequestedAt time.Time `json:"requestedAt"`
 }
 
+func (w *Writer) TrophyCompleted(ctx context.Context, userID, trophyID string) (bool, error) {
+	var raw []byte
+	if err := w.pool.QueryRow(ctx, `SELECT prizes FROM profiles WHERE telegram_id=$1`, userID).Scan(&raw); err != nil {
+		if err == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	var prizes []struct {
+		ID             string `json:"id"`
+		CollectedParts int    `json:"collectedParts"`
+		Total          int    `json:"total"`
+	}
+	if err := json.Unmarshal(raw, &prizes); err != nil {
+		return false, err
+	}
+	for _, prize := range prizes {
+		if prize.ID == trophyID && prize.Total > 1 && prize.CollectedParts >= prize.Total {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (w *Writer) RecordTrophyRewardRequest(ctx context.Context, userID, trophyID, trophyName, source string) (bool, error) {
 	result, err := w.pool.Exec(ctx, `INSERT INTO trophy_reward_requests(user_id,trophy_id,trophy_name,source) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,trophy_id) DO NOTHING`, userID, trophyID, trophyName, source)
 	return result.RowsAffected() == 1, err

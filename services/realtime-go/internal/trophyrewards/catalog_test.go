@@ -31,7 +31,7 @@ func TestRewardKindsCoverEveryPuzzlePrize(t *testing.T) {
 	expected := map[string]Kind{
 		"yng-explrz": KindCode, "stashvpn": KindCode,
 		"besigned": KindURL, "stickers": KindURL, "stikidbot": KindURL,
-		"bear": KindURL, "bear-redjex": KindURL,
+		"bear": KindRequest, "bear-redjex": KindRequest,
 		"liberty-figure-252202": KindURL, "candy-cane-162605": KindURL,
 		"vice-cream-227533": KindURL, "vice-cream-428029": KindURL,
 		"chill-flame-303522": KindURL,

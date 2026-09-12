@@ -15,6 +15,7 @@ type Kind string
 const (
 	KindCode    Kind = "code"
 	KindURL     Kind = "url"
+	KindRequest Kind = "request"
 	maxFileSize      = 1 << 20
 )
 
@@ -24,8 +25,8 @@ var rewardKinds = map[string]Kind{
 	"besigned":              KindURL,
 	"stickers":              KindURL,
 	"stikidbot":             KindURL,
-	"bear":                  KindURL,
-	"bear-redjex":           KindURL,
+	"bear":                  KindRequest,
+	"bear-redjex":           KindRequest,
 	"liberty-figure-252202": KindURL,
 	"candy-cane-162605":     KindURL,
 	"vice-cream-227533":     KindURL,
