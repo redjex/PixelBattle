@@ -18,6 +18,7 @@ type TrophyReward = {
 };
 
 const trophyRewardCache = new Map<string, TrophyReward>();
+const manualRequestTrophies = new Set(['bear', 'bear-redjex']);
 
 type TrophyPart = {
   src: string;
@@ -311,6 +312,10 @@ function TrophyRewardDialog({ trophy, onClose }: { trophy: TrophyDefinition; onC
     const apiUrl = import.meta.env.VITE_API_URL ?? window.location.origin;
     setReward(null);
     setError('');
+    if (manualRequestTrophies.has(trophy.id)) {
+      setReward({ trophyId: trophy.id, kind: 'request', value: '' });
+      return;
+    }
     const cacheKey = `${initData}\u0000${trophy.id}`;
     const cachedReward = trophyRewardCache.get(cacheKey);
     if (cachedReward) {
