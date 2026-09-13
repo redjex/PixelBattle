@@ -546,6 +546,11 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!boardReadyRef.current) return;
+    if (event.button === 2) {
+      event.preventDefault();
+      sample(event);
+      return;
+    }
     if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     if (!eyedropper && templateRef.current) {
@@ -622,9 +627,8 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       const drag = dragRef.current;
       if (!drag || drag.moved) return;
       const pixel = pixelsRef.current.get(`${drag.cellX}:${drag.cellY}`);
-      if (!pixel) return;
       drag.longPressed = true;
-      onInspectPixel(pixel);
+      onPickColor(normalizeBoardColor(pixel?.color ?? '#ffffff'));
       navigator.vibrate?.(25);
     }, 520);
   }
