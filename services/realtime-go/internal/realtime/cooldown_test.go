@@ -12,10 +12,10 @@ func TestCooldownBounded(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		c.Allow(fmt.Sprint(i), "main", time.Minute, now)
 	}
-	if allowed, _ := c.Allow("overflow", "main", time.Minute, now); allowed || len(c.last) != 10000 {
+	if allowed, _, _ := c.Allow("overflow", "main", time.Minute, now); allowed || len(c.players) != 10000 {
 		t.Fatal("cooldown table unbounded")
 	}
-	if allowed, _ := c.Allow("overflow", "main", time.Minute, now.Add(time.Minute)); !allowed || len(c.last) != 1 {
+	if allowed, _, _ := c.Allow("overflow", "main", time.Minute, now.Add(stateLifetime+time.Second)); !allowed || len(c.players) != 1 {
 		t.Fatal("expired cooldowns not reclaimed")
 	}
 }
@@ -23,16 +23,31 @@ func TestCooldownBounded(t *testing.T) {
 func TestCooldownAllowsOncePerBoardAndUser(t *testing.T) {
 	cooldown := NewCooldown()
 	now := time.Unix(100, 0)
-	if allowed, _ := cooldown.Allow("user-1", "main", 10*time.Second, now); !allowed {
+	if allowed, _, effective := cooldown.Allow("user-1", "main", 10*time.Second, now); !allowed || effective != 10*time.Second {
 		t.Fatal("first placement should be allowed")
 	}
-	if allowed, retry := cooldown.Allow("user-1", "main", 10*time.Second, now.Add(time.Second)); allowed || retry != 9*time.Second {
+	if allowed, retry, _ := cooldown.Allow("user-1", "main", 10*time.Second, now.Add(time.Second)); allowed || retry != 9*time.Second {
 		t.Fatalf("expected 9 second retry, got allowed=%v retry=%s", allowed, retry)
 	}
-	if allowed, _ := cooldown.Allow("user-1", "main", 10*time.Second, now.Add(10*time.Second)); !allowed {
+	if allowed, _, effective := cooldown.Allow("user-1", "main", 10*time.Second, now.Add(10*time.Second)); !allowed || effective != 10*time.Second {
 		t.Fatal("placement should be allowed after cooldown")
 	}
-	if allowed, _ := cooldown.Allow("user-1", "other", 10*time.Second, now); !allowed {
+	if allowed, _, _ := cooldown.Allow("user-1", "other", 10*time.Second, now); !allowed {
 		t.Fatal("cooldown should be scoped to a board")
+	}
+}
+
+func TestCooldownAddsOneIdlePenalty(t *testing.T) {
+	cooldown := NewCooldown()
+	now := time.Unix(100, 0)
+	cooldown.Allow("user", "main", 5*time.Second, now)
+	if allowed, _, effective := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute)); !allowed || effective != 10*time.Second {
+		t.Fatalf("idle placement effective cooldown = %s, allowed=%v", effective, allowed)
+	}
+	if allowed, retry, _ := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute+5*time.Second)); allowed || retry != 5*time.Second {
+		t.Fatalf("idle penalty was not enforced: allowed=%v retry=%s", allowed, retry)
+	}
+	if allowed, _, effective := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute+10*time.Second)); !allowed || effective != 5*time.Second {
+		t.Fatalf("idle penalty repeated unexpectedly: effective=%s allowed=%v", effective, allowed)
 	}
 }

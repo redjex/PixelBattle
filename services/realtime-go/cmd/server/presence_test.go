@@ -27,3 +27,17 @@ func TestAppPresenceCountsUniqueActiveUsers(t *testing.T) {
 		t.Fatalf("expired user was not removed: count = %d, want 1", got)
 	}
 }
+
+func TestPresenceReportsIndividualOnlineState(t *testing.T) {
+	clock := time.Unix(100, 0)
+	presence := newAppPresence(10 * time.Second)
+	presence.now = func() time.Time { return clock }
+	presence.Touch(101)
+	if !presence.IsOnline(101) || presence.IsOnline(202) {
+		t.Fatal("unexpected online state")
+	}
+	clock = clock.Add(11 * time.Second)
+	if presence.IsOnline(101) {
+		t.Fatal("expired user remained online")
+	}
+}

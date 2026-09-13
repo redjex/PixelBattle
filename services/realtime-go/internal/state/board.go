@@ -29,7 +29,7 @@ func (s *BoardStore) Apply(event domain.PixelEvent) {
 	if current, ok := board[key]; ok && current.Version >= event.Version {
 		return
 	}
-	board[key] = domain.BoardPixel{X: event.X, Y: event.Y, Color: event.Color, Version: event.Version, Author: event.Author, FrozenUntil: event.FrozenUntil}
+	board[key] = domain.BoardPixel{X: event.X, Y: event.Y, Color: event.Color, Version: event.Version, Author: event.Author, FrozenUntil: event.FrozenUntil, UpdatedAt: event.CreatedAt}
 	s.revisions[event.BoardID]++
 }
 

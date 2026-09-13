@@ -32,6 +32,7 @@ var rewardKinds = map[string]Kind{
 	"vice-cream-227533":     KindURL,
 	"vice-cream-428029":     KindURL,
 	"chill-flame-303522":    KindURL,
+	"vice-cream-10":         KindRequest,
 }
 
 type Catalog struct {

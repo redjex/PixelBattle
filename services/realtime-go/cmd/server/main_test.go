@@ -1,27 +1,10 @@
 package main
 
 import (
-	"reflect"
 	"testing"
 
 	"pixelbattle/realtime/internal/domain"
 )
-
-func TestBombPaletteUsesOnlyPaletteColumn(t *testing.T) {
-	tests := []struct {
-		selected string
-		want     []string
-	}{
-		{selected: "#000000", want: []string{"#000000", "#FDFDFD", "#8A8A8A"}},
-		{selected: "#001EFF", want: []string{"#001EFF", "#8290FF", "#001194"}},
-		{selected: "#FF0000", want: []string{"#FF0000", "#FF8080", "#870000"}},
-	}
-	for _, test := range tests {
-		if got := bombPalette(test.selected); !reflect.DeepEqual(got, test.want) {
-			t.Errorf("bombPalette(%q) = %v, want %v", test.selected, got, test.want)
-		}
-	}
-}
 
 func TestPlayerLevelMatchesFrontendProgression(t *testing.T) {
 	tests := []struct {

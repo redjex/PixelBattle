@@ -35,6 +35,7 @@ func TestRewardKindsCoverEveryPuzzlePrize(t *testing.T) {
 		"liberty-figure-252202": KindURL, "candy-cane-162605": KindURL,
 		"vice-cream-227533": KindURL, "vice-cream-428029": KindURL,
 		"chill-flame-303522": KindURL,
+		"vice-cream-10":      KindRequest,
 	}
 	if len(rewardKinds) != len(expected) {
 		t.Fatalf("reward kind count = %d, want %d", len(rewardKinds), len(expected))

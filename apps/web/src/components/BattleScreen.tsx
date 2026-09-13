@@ -11,6 +11,18 @@ const COLORS = [
   '#FF0000', '#FF9D00', '#F2FF00', '#00FF07', '#00FFE6', '#009DFF', '#001EFF', '#9900FF', '#FF00A1', '#8A8A8A',
   '#870000', '#8D4E00', '#B6A700', '#009904', '#009687', '#00568C', '#001194', '#53008A', '#8E005A', '#000000',
 ] as const;
+const SELECTED_COLOR_STORAGE_KEY = 'pixelbattle:selected-color';
+const DEFAULT_COLOR = '#009DFF';
+
+function getSavedColor() {
+  try {
+    const saved = window.localStorage.getItem(SELECTED_COLOR_STORAGE_KEY)?.toUpperCase();
+    if (saved && COLORS.includes(saved as typeof COLORS[number])) return saved;
+  } catch {
+    // Storage can be unavailable in restricted WebViews.
+  }
+  return DEFAULT_COLOR;
+}
 
 type PixelAuthor = NonNullable<Pixel['author']>;
 type Inventory = { bombs: number; ice: number; freezeRemaining: number };
@@ -70,7 +82,7 @@ export function BattleScreen({ online }: { online: number | null }) {
   const [zoom, setZoom] = useState(10);
   const zoomRef = useRef(10);
   const zoomAnimationRef = useRef<number | null>(null);
-  const [color, setColor] = useState<string>('#009DFF');
+  const [color, setColor] = useState<string>(getSavedColor);
   const [selectedPixel, setSelectedPixel] = useState<{ x: number; y: number } | null>(null);
   const [paintNonce, setPaintNonce] = useState(0);
   const [cooldownUntil, setCooldownUntil] = useState(0);
@@ -92,6 +104,14 @@ export function BattleScreen({ online }: { online: number | null }) {
   const frozenSeconds = Math.max(0, Math.ceil((frozenUntil - clock) / 1000));
   const isForeignFrozen = frozenSeconds > 0 && Boolean(inspectedPixel?.author?.id) && inspectedPixel?.author?.id !== currentUserID;
   const frozenLabel = frozenSeconds >= 60 ? `Лёд: ${Math.ceil(frozenSeconds / 60)} мин` : `Лёд: ${frozenSeconds} сек`;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SELECTED_COLOR_STORAGE_KEY, color);
+    } catch {
+      // Keep the selected color for the current session if storage is unavailable.
+    }
+  }, [color]);
 
   const inspectPixel = useCallback((pixel: Pixel | null) => {
     const pixelAuthor = pixel?.author;

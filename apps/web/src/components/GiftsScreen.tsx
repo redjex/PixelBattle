@@ -130,6 +130,11 @@ const TROPHIES: TrophyDefinition[] = [
     name: 'ChillFlame #303522', total: 4, base: '',
     preview: '/assets/trophies/png/9.png', puzzleImage: '/assets/trophies/png/9.png', parts: [],
   },
+  {
+    id: 'vice-cream-10', aliases: ['vicecream', 'vice cream', 'vicecream 10', 'vice cream 10'],
+    name: 'ViceCream', total: 4, base: '',
+    preview: '/assets/trophies/png/10.png', puzzleImage: '/assets/trophies/png/10.png', parts: [],
+  },
 ];
 
 const TROPHY_CATALOG_GROUPS: { rarity: TrophyRarity; label: string; trophyIds: string[] }[] = [
@@ -142,6 +147,7 @@ const TROPHY_CATALOG_GROUPS: { rarity: TrophyRarity; label: string; trophyIds: s
       'vice-cream-227533',
       'vice-cream-428029',
       'chill-flame-303522',
+      'vice-cream-10',
     ],
   },
   { rarity: 'rare', label: 'Редкие', trophyIds: ['bear', 'bear-redjex'] },

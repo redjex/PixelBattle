@@ -38,14 +38,10 @@ import (
 )
 
 var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
-var itemPalette = []string{
-	"#FF8080", "#FFCA73", "#FBFFA5", "#7CFF80", "#7EFFF2", "#84D0FF", "#8290FF", "#CD81FF", "#FF80D0", "#FDFDFD",
-	"#FF0000", "#FF9D00", "#F2FF00", "#00FF07", "#00FFE6", "#009DFF", "#001EFF", "#9900FF", "#FF00A1", "#8A8A8A",
-	"#870000", "#8D4E00", "#B6A700", "#009904", "#009687", "#00568C", "#001194", "#53008A", "#8E005A", "#000000",
-}
 
 const defaultBoardSize = 150
 const placementCooldown = 5 * time.Second
+const rapidForeignRepaintWindow = 2 * time.Second
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -53,7 +49,7 @@ func main() {
 	hub := realtime.NewHub()
 	presence := newAppPresence(10 * time.Second)
 	cooldown := realtime.NewCooldown()
-	captchaGuard := antibot.New()
+	var captchaGuard *antibot.Guard
 	trophyRewardCatalog := trophyrewards.New(env("TROPHY_REWARDS_DIR", "/run/secrets/pixelbattle-trophy-rewards"))
 	recorder := newGameRecorder(env("RECORDING_STATE_PATH", "/var/lib/pixelbattle-recording/state.json"))
 	memoryQueue := queue.NewMemory()
@@ -96,6 +92,25 @@ func main() {
 	}
 	defer accessStore.Close()
 	go accessStore.Run(ctx)
+	if devMemory {
+		captchaGuard = antibot.New()
+	} else {
+		penaltyStore, storeErr := antibot.NewPenaltyStore(startupCtx, redisURL)
+		if storeErr != nil {
+			log.Fatalf("captcha penalty store startup failed: %v", storeErr)
+		}
+		defer penaltyStore.Close()
+		penalties, loadErr := penaltyStore.Load(startupCtx)
+		if loadErr != nil {
+			log.Fatalf("captcha penalties load failed: %v", loadErr)
+		}
+		captchaGuard = antibot.NewPersistent(penalties, func(identity string) (int, error) {
+			writeCtx, writeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer writeCancel()
+			return penaltyStore.Increment(writeCtx, identity)
+		})
+		log.Printf("restored captcha cooldown penalties: %d", len(penalties))
+	}
 
 	if !devMemory {
 		writer, err = persistence.NewWriter(startupCtx, env("POSTGRES_DSN", "postgres://pixelbattle:pixelbattle@localhost:5432/pixelbattle?sslmode=disable"))
@@ -259,6 +274,9 @@ func main() {
 			}
 		}
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
+		if userCooldown > 0 {
+			userCooldown += captchaGuard.Penalty(strconv.FormatInt(telegramUser.ID, 10), time.Now().UTC())
+		}
 		inventory := persistence.Inventory{}
 		prizes := json.RawMessage("[]")
 		soldOutTrophies := []string{}
@@ -563,7 +581,8 @@ func main() {
 		}
 		now := time.Now().UTC()
 		var existingFreeze *time.Time
-		if current, ok := boardStore.Pixel(request.BoardID, request.X, request.Y); ok && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
+		current, hasCurrent := boardStore.Pixel(request.BoardID, request.X, request.Y)
+		if hasCurrent && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
 			if current.Author.ID != identity {
 				w.Header().Set("Cache-Control", "no-store")
 				w.WriteHeader(http.StatusLocked)
@@ -572,13 +591,29 @@ func main() {
 			}
 			existingFreeze = current.FrozenUntil
 		}
+		if hasCurrent && isRapidForeignRepaint(current, identity, now) && captchaGuard.Flag(identity, now) {
+			log.Printf("captcha required after rapid foreign repaint: user=%s previous_user=%s age=%s", identity, current.Author.ID, now.Sub(current.UpdatedAt))
+			writeCaptchaRequired(w)
+			return
+		}
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
 		if userCooldown > 0 {
-			if allowed, retryAfter := cooldown.Allow(identity, request.BoardID, userCooldown, time.Now()); !allowed {
+			userCooldown += captchaGuard.Penalty(identity, now)
+		}
+		appliedCooldown := userCooldown
+		if userCooldown > 0 {
+			allowed, retryAfter, effectiveCooldown := cooldown.Allow(identity, request.BoardID, userCooldown, now)
+			if !allowed {
+				if effectiveCooldown > userCooldown && captchaGuard.Flag(identity, now) {
+					log.Printf("captcha required after ignored idle cooldown: user=%s", identity)
+					writeCaptchaRequired(w)
+					return
+				}
 				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 				http.Error(w, "placement cooldown", http.StatusTooManyRequests)
 				return
 			}
+			appliedCooldown = effectiveCooldown
 		}
 		author := profileFromTelegram(telegramUser)
 		frozenUntil := existingFreeze
@@ -618,7 +653,7 @@ func main() {
 		payload, _ := json.Marshal(publicEvent)
 		hub.Broadcast(payload)
 		publicEvent.CaptchaRequired = captchaRequired
-		publicEvent.CooldownMs = userCooldown.Milliseconds()
+		publicEvent.CooldownMs = appliedCooldown.Milliseconds()
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, publicEvent)
 	})
@@ -660,11 +695,22 @@ func main() {
 		now := time.Now().UTC()
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
 		if userCooldown > 0 {
-			if allowed, retryAfter := cooldown.Allow(identity, "main", userCooldown, now); !allowed {
+			userCooldown += captchaGuard.Penalty(identity, now)
+		}
+		appliedCooldown := userCooldown
+		if userCooldown > 0 {
+			allowed, retryAfter, effectiveCooldown := cooldown.Allow(identity, "main", userCooldown, now)
+			if !allowed {
+				if effectiveCooldown > userCooldown && captchaGuard.Flag(identity, now) {
+					log.Printf("captcha required after ignored idle cooldown: user=%s", identity)
+					writeCaptchaRequired(w)
+					return
+				}
 				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 				http.Error(w, "placement cooldown", http.StatusTooManyRequests)
 				return
 			}
+			appliedCooldown = effectiveCooldown
 		}
 		inventory, consumed, err := writer.ConsumeBomb(r.Context(), identity)
 		if err != nil {
@@ -677,7 +723,7 @@ func main() {
 			return
 		}
 		author := profileFromTelegram(telegramUser)
-		colors := bombPalette(request.Color)
+		bombColor := strings.ToUpper(request.Color)
 		events := make([]domain.PixelEvent, 0, 21)
 		for dy := -2; dy <= 2; dy++ {
 			for dx := -2; dx <= 2; dx++ {
@@ -692,8 +738,7 @@ func main() {
 					}
 					frozenUntil = current.FrozenUntil
 				}
-				shade := bombColor(colors, dx, dy)
-				events = append(events, domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: "main", X: x, Y: y, Color: shade, OperationID: "server:" + id(), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil})
+				events = append(events, domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: "main", X: x, Y: y, Color: bombColor, OperationID: "server:" + id(), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil})
 			}
 		}
 		if len(events) == 0 {
@@ -717,7 +762,7 @@ func main() {
 		captchaGuard.RecordPlacement(identity, now, userCooldown)
 		awardDueTrophy(r.Context(), identity, author)
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory, "cooldownMs": userCooldown.Milliseconds()})
+		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory, "cooldownMs": appliedCooldown.Milliseconds()})
 	})
 	statsHandler := func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -1115,7 +1160,14 @@ func main() {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
-		writeJSON(w, map[string]any{"players": captchaGuard.ReviewStatuses(time.Now().UTC())})
+		statuses := captchaGuard.ReviewStatuses(time.Now().UTC())
+		for index := range statuses {
+			userID, err := strconv.ParseInt(statuses[index].UserID, 10, 64)
+			if err == nil {
+				statuses[index].Online = presence.IsOnline(userID)
+			}
+		}
+		writeJSON(w, map[string]any{"players": statuses})
 	})
 	http.HandleFunc("/api/admin/trophy-chat-notifications", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
@@ -1235,6 +1287,35 @@ func main() {
 		payload, _ := json.Marshal(map[string]any{"type": "captcha_required"})
 		hub.SendToUser(identity, payload)
 		writeJSON(w, map[string]any{"required": true, "userId": identity})
+	})
+	http.HandleFunc("/api/admin/captcha/penalize", func(w http.ResponseWriter, r *http.Request) {
+		if !adminAuthorized(r, adminAPIToken) {
+			http.Error(w, "admin access required", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			UserID string `json:"userId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid captcha penalty request", http.StatusBadRequest)
+			return
+		}
+		userID, err := strconv.ParseInt(request.UserID, 10, 64)
+		if err != nil || userID <= 0 || !presence.IsOnline(userID) {
+			http.Error(w, "player is not online", http.StatusConflict)
+			return
+		}
+		identity := strconv.FormatInt(userID, 10)
+		penalty, strikes, ok := captchaGuard.Penalize(identity, time.Now().UTC())
+		if !ok {
+			http.Error(w, "captcha is not pending", http.StatusConflict)
+			return
+		}
+		writeJSON(w, map[string]any{"userId": identity, "strikeCount": strikes, "penaltySeconds": int64(penalty / time.Second)})
 	})
 	http.HandleFunc("/api/admin/quests/reset", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
@@ -1544,19 +1625,36 @@ func main() {
 				}
 				now := time.Now().UTC()
 				var existingFreeze *time.Time
-				if current, ok := boardStore.Pixel(request.BoardID, request.X, request.Y); ok && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
+				current, hasCurrent := boardStore.Pixel(request.BoardID, request.X, request.Y)
+				if hasCurrent && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
 					if current.Author.ID != identity {
 						_ = client.SendJSON(map[string]any{"type": "error", "code": "pixel_frozen", "frozenUntil": current.FrozenUntil})
 						return
 					}
 					existingFreeze = current.FrozenUntil
 				}
+				if hasCurrent && isRapidForeignRepaint(current, identity, now) && captchaGuard.Flag(identity, now) {
+					log.Printf("captcha required after rapid foreign repaint: user=%s previous_user=%s age=%s", identity, current.Author.ID, now.Sub(current.UpdatedAt))
+					_ = client.SendJSON(map[string]any{"type": "captcha_required"})
+					return
+				}
 				userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
 				if userCooldown > 0 {
-					if allowed, retryAfter := cooldown.Allow(identity, request.BoardID, userCooldown, time.Now()); !allowed {
+					userCooldown += captchaGuard.Penalty(identity, now)
+				}
+				appliedCooldown := userCooldown
+				if userCooldown > 0 {
+					allowed, retryAfter, effectiveCooldown := cooldown.Allow(identity, request.BoardID, userCooldown, now)
+					if !allowed {
+						if effectiveCooldown > userCooldown && captchaGuard.Flag(identity, now) {
+							log.Printf("captcha required after ignored idle cooldown: user=%s", identity)
+							_ = client.SendJSON(map[string]any{"type": "captcha_required"})
+							return
+						}
 						_ = client.SendJSON(map[string]any{"type": "error", "code": "placement_cooldown", "message": fmt.Sprintf("Place one pixel every %s", userCooldown), "retryAfterMs": retryAfter.Milliseconds()})
 						return
 					}
+					appliedCooldown = effectiveCooldown
 				}
 				author := profileFromTelegram(telegramUser)
 				frozenUntil := existingFreeze
@@ -1594,6 +1692,8 @@ func main() {
 				hub.Broadcast(payload)
 				if captchaRequired {
 					_ = client.SendJSON(map[string]any{"type": "captcha_required"})
+				} else if appliedCooldown != userCooldown {
+					_ = client.SendJSON(map[string]any{"type": "cooldown_updated", "cooldownMs": appliedCooldown.Milliseconds()})
 				}
 			}()
 		}
@@ -1684,54 +1784,6 @@ func levelReward(level int) (string, int64) {
 	}
 	amount := int64(((level-1)/20 + 1) * 5)
 	return item, amount
-}
-func parseHex(value string) (int, int, int) {
-	parsed, err := strconv.ParseUint(strings.TrimPrefix(value, "#"), 16, 32)
-	if err != nil {
-		return 0, 0, 0
-	}
-	return int(parsed >> 16), int((parsed >> 8) & 255), int(parsed & 255)
-}
-func bombPalette(selected string) []string {
-	selected = strings.ToUpper(selected)
-	anchor := 0
-	bestDistance := int(^uint(0) >> 1)
-	r, g, b := parseHex(selected)
-	for index, value := range itemPalette {
-		if value == selected {
-			anchor = index
-			bestDistance = 0
-			break
-		}
-		cr, cg, cb := parseHex(value)
-		dr, dg, db := r-cr, g-cg, b-cb
-		distance := dr*dr + dg*dg + db*db
-		if distance < bestDistance {
-			anchor = index
-			bestDistance = distance
-		}
-	}
-	column := anchor % 10
-	result := []string{selected}
-	for row := 0; row < 3; row++ {
-		value := itemPalette[row*10+column]
-		if value != selected {
-			result = append(result, value)
-		}
-	}
-	return result
-}
-func bombColor(colors []string, dx, dy int) string {
-	distance := dx*dx + dy*dy
-	roll := int(randomByte())
-	if distance <= 1 || len(colors) == 1 || roll < 132 {
-		return colors[0]
-	}
-	index := 1 + int(randomByte())%(len(colors)-1)
-	if distance <= 2 && roll < 210 {
-		index = 1
-	}
-	return colors[index]
 }
 func profileFromTelegram(user auth.TelegramUser) domain.PixelAuthor {
 	displayName := strings.TrimSpace(user.FirstName + " " + user.LastName)
@@ -1936,7 +1988,7 @@ func trophyRewardRequestSource(trophyID string) string {
 		return "Идейный Аниматор"
 	case "bear-redjex":
 		return "redjex"
-	case "liberty-figure-252202", "candy-cane-162605", "vice-cream-227533", "vice-cream-428029", "chill-flame-303522":
+	case "liberty-figure-252202", "candy-cane-162605", "vice-cream-227533", "vice-cream-428029", "chill-flame-303522", "vice-cream-10":
 		return "NFT"
 	default:
 		return ""
@@ -1960,6 +2012,7 @@ var trophyDefinitionsForRequests = []struct{ ID, Name string }{
 	{"vice-cream-227533", "ViceCream #227533"},
 	{"vice-cream-428029", "ViceCream #428029"},
 	{"chill-flame-303522", "ChillFlame #303522"},
+	{"vice-cream-10", "ViceCream"},
 }
 
 func publicSnapshot(pixels []domain.BoardPixel) []publicBoardPixel {
@@ -1971,6 +2024,13 @@ func publicSnapshot(pixels []domain.BoardPixel) []publicBoardPixel {
 }
 func eventForClient(event domain.PixelEvent) publicPixelEvent {
 	return publicPixelEvent{Type: event.Type, X: event.X, Y: event.Y, Color: event.Color, Version: event.Version, Author: publicPixelAuthor{ID: event.Author.ID}, FrozenUntil: event.FrozenUntil}
+}
+func isRapidForeignRepaint(current domain.BoardPixel, identity string, now time.Time) bool {
+	if identity == "" || current.Author.ID == "" || current.Author.ID == identity || current.UpdatedAt.IsZero() {
+		return false
+	}
+	age := now.Sub(current.UpdatedAt)
+	return age >= 0 && age <= rapidForeignRepaintWindow
 }
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")

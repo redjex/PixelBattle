@@ -61,9 +61,23 @@ MAP_MESSAGE_KEY_PREFIX = "pixelbattle:map:message:"
 ADMIN_MENU_MESSAGE_KEY_PREFIX = "pixelbattle:admin:menu:message:"
 MAP_CLEAR_BACKUP_KEY = "pixelbattle:map:last_clear_backup"
 CAPTCHA_NOTIFICATION_KEY = "pixelbattle:captcha:admin_notifications"
+CAPTCHA_NOTIFICATION_MESSAGE_KEY = "pixelbattle:captcha:admin_message_ids"
+CAPTCHA_PENALTY_KEY = "pixelbattle:captcha:penalty_strikes"
+CAPTCHA_TOPIC_ANNOUNCEMENT_KEY = "pixelbattle:captcha:topic:announcement:v2"
+CAPTCHA_TOPIC_POINTER_KEY = "pixelbattle:captcha:topic:pointer:v1"
 CAPTCHA_NOTIFICATION_POLL_SECONDS = 5
 CAPTCHA_SUSPICION_GRACE_SECONDS = 60
 CAPTCHA_ALERT_CHAT_ID = int(os.getenv("CAPTCHA_ALERT_CHAT_ID", "-1004326871238"))
+CAPTCHA_TOPIC_NAME = os.getenv("CAPTCHA_TOPIC_NAME", "Боты").strip() or "Боты"
+CONFIRMED_BOT_USERNAMES = {
+    "613263066": "volks_bagged",
+    "773016303": "devconfig",
+    "796632015": "mrchopra10",
+    "820593275": "",
+    "882199385": "dotj2",
+    "972232344": "kavikavon",
+    "991531836": "d2rok",
+}
 REWARD_REQUEST_POLL_SECONDS = 5
 TROPHY_ALERT_CHAT_ID = int(os.getenv("TROPHY_ALERT_CHAT_ID", str(CAPTCHA_ALERT_CHAT_ID)))
 TROPHY_TOPIC_NAME = os.getenv("TROPHY_TOPIC_NAME", "Трофеи").strip() or "Трофеи"
@@ -78,6 +92,10 @@ if TROPHY_NOTIFICATION_INTERVAL_SECONDS < 3:
     raise RuntimeError("TROPHY_NOTIFICATION_INTERVAL_SECONDS must be at least 3")
 TROPHY_NOTIFICATION_POLL_SECONDS = 5
 NOTIFICATION_TOPICS = {
+    "captcha": (
+        CAPTCHA_TOPIC_NAME,
+        f"pixelbattle:captcha:topic:{CAPTCHA_ALERT_CHAT_ID}",
+    ),
     "trophy": (
         TROPHY_TOPIC_NAME,
         f"pixelbattle:trophies:topic:{TROPHY_ALERT_CHAT_ID}",
@@ -103,6 +121,7 @@ TROPHY_IMAGE_PATHS = {
     "vice-cream-227533": "/assets/trophies/png/7.png",
     "vice-cream-428029": "/assets/trophies/png/8.png",
     "chill-flame-303522": "/assets/trophies/png/9.png",
+    "vice-cream-10": "/assets/trophies/png/10.png",
 }
 
 FILL_COLORS = [
@@ -146,9 +165,10 @@ pending_prompt_messages: dict[tuple[int, int], int] = {}
 
 
 class TelegramAPIError(RuntimeError):
-    def __init__(self, retry_after: float = 0) -> None:
-        super().__init__("Telegram request failed")
+    def __init__(self, retry_after: float = 0, description: str = "") -> None:
+        super().__init__(description or "Telegram request failed")
         self.retry_after = retry_after
+        self.description = description
 
 
 def call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +180,10 @@ def call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not response.ok or not result.get("ok"):
         parameters = result.get("parameters", {})
         retry_after = parameters.get("retry_after", 0) if isinstance(parameters, dict) else 0
-        raise TelegramAPIError(float(retry_after) if retry_after else 0)
+        raise TelegramAPIError(
+            float(retry_after) if retry_after else 0,
+            str(result.get("description", "")),
+        )
     return result
 
 
@@ -169,10 +192,13 @@ def send_message(
     text: str,
     reply_markup: dict | None = None,
     delete_after: float | None = None,
+    message_thread_id: int | None = None,
 ) -> int | None:
     payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    if message_thread_id:
+        payload["message_thread_id"] = message_thread_id
     result = call("sendMessage", payload)
     message_id = result.get("result", {}).get("message_id")
     if message_id and delete_after:
@@ -589,18 +615,98 @@ def fetch_captcha_statuses() -> list[dict[str, Any]]:
     return players if isinstance(players, list) else []
 
 
+def penalize_pending_captcha(user_id: str) -> tuple[int, int]:
+    response = realtime_request(
+        "POST", "/api/admin/captcha/penalize", json={"userId": user_id}
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return int(payload.get("strikeCount", 0)), int(payload.get("penaltySeconds", 0))
+
+
+def edit_captcha_message(message_id: int, text: str) -> None:
+    call(
+        "editMessageText",
+        {"chat_id": CAPTCHA_ALERT_CHAT_ID, "message_id": message_id, "text": text},
+    )
+
+
+def send_captcha_topic_message(text: str) -> int | None:
+    topic_key = NOTIFICATION_TOPICS["captcha"][1]
+    for attempt in range(2):
+        try:
+            return send_message(
+                CAPTCHA_ALERT_CHAT_ID,
+                text,
+                message_thread_id=notification_topic_id("captcha"),
+            )
+        except TelegramAPIError as exc:
+            description = exc.description.lower()
+            if attempt == 0 and ("thread" in description or "topic" in description):
+                database.delete(topic_key)
+                continue
+            raise
+    return None
+
+
+def ensure_captcha_topic_visible() -> None:
+    topic_id = notification_topic_id("captcha")
+    if not database.get(CAPTCHA_TOPIC_POINTER_KEY):
+        internal_chat_id = str(abs(CAPTCHA_ALERT_CHAT_ID)).removeprefix("100")
+        pointer_id = send_message(
+            CAPTCHA_ALERT_CHAT_ID,
+            "🤖 Античит Pixel Battle: подтверждённые боты и их штрафы находятся в отдельном топике.",
+            reply_markup={
+                "inline_keyboard": [[{
+                    "text": "Открыть топик «Боты»",
+                    "url": f"https://t.me/c/{internal_chat_id}/{topic_id}",
+                }]]
+            },
+        )
+        if pointer_id is not None:
+            database.set(CAPTCHA_TOPIC_POINTER_KEY, str(pointer_id))
+    if database.get(CAPTCHA_TOPIC_ANNOUNCEMENT_KEY):
+        return
+    message_id = send_captcha_topic_message(
+        "🤖 Подтверждённые боты Pixel Battle отслеживаются в этом топике."
+    )
+    if message_id is not None:
+        database.set(CAPTCHA_TOPIC_ANNOUNCEMENT_KEY, str(message_id))
+
+
 def notify_admins_about_captcha_statuses() -> None:
-    for player in fetch_captcha_statuses():
+    try:
+        ensure_captcha_topic_visible()
+    except (RuntimeError, requests.RequestException):
+        print("captcha topic announcement failed", flush=True)
+    players = fetch_captcha_statuses()
+    reported_ids = {
+        str(player.get("userId", ""))
+        for player in players
+        if isinstance(player, dict)
+    }
+    # Confirmed bots must remain visible after a realtime restart even though
+    # live CAPTCHA review state is intentionally in-memory.
+    for confirmed_id in CONFIRMED_BOT_USERNAMES:
+        if confirmed_id in reported_ids:
+            continue
+        raw_strikes = database.hget(CAPTCHA_PENALTY_KEY, confirmed_id)
+        strikes = int(raw_strikes) if raw_strikes and str(raw_strikes).isdigit() else 0
+        players.append({
+            "userId": confirmed_id,
+            "status": "clean",
+            "updatedAt": "confirmed-bot",
+            "strikeCount": strikes,
+            "penaltySeconds": strikes * 5,
+            "online": False,
+        })
+    for player in players:
         if not isinstance(player, dict):
             continue
         user_id = str(player.get("userId", ""))
         status = player.get("status")
         updated_at = str(player.get("updatedAt", ""))
-        if (
-            not user_id.isdigit()
-            or status not in {"clean", "suspicious"}
-            or not updated_at
-        ):
+        if not user_id.isdigit() or status not in {"clean", "suspicious"} or not updated_at:
             continue
         if status == "suspicious":
             try:
@@ -611,24 +717,56 @@ def notify_admins_about_captcha_statuses() -> None:
                 continue
             if time.time() - status_changed_at < CAPTCHA_SUSPICION_GRACE_SECONDS:
                 continue
-        username = database.hget(USER_ID_KEY, user_id)
+            if not player.get("online"):
+                continue
+        confirmed_bot = user_id in CONFIRMED_BOT_USERNAMES
+        username = database.hget(USER_ID_KEY, user_id) or CONFIRMED_BOT_USERNAMES.get(user_id)
         label = f"@{username} (ID {user_id})" if username else f"ID {user_id}"
-        if status == "clean":
-            message = f"✅ {label} прошёл капчу — человек чистый."
-        else:
-            message = f"⚠️ {label} не прошёл капчу — пользователь под подозрением."
-        marker = f"{status}:{updated_at}"
+        marker = f"v2:{status}:{updated_at}"
         notification_id = f"{CAPTCHA_ALERT_CHAT_ID}:{user_id}"
         if database.hget(CAPTCHA_NOTIFICATION_KEY, notification_id) == marker:
             continue
+        stored_message_id = database.hget(CAPTCHA_NOTIFICATION_MESSAGE_KEY, notification_id)
+        message_id = int(stored_message_id) if stored_message_id and str(stored_message_id).isdigit() else None
+
+        if status == "clean" and not confirmed_bot:
+            if message_id is None:
+                database.hset(CAPTCHA_NOTIFICATION_KEY, notification_id, marker)
+                continue
+            message = f"✅ {label} прошёл капчу."
+        elif status == "clean":
+            strike_count = max(0, int(player.get("strikeCount", 0)))
+            penalty_seconds = max(0, int(player.get("penaltySeconds", 0)))
+            multiplier = f" x{strike_count}" if strike_count > 1 else ""
+            message = f"🤖 {label} — подтверждённый бот{multiplier}\n+{penalty_seconds} секунд к задержке"
+        else:
+            try:
+                strike_count, penalty_seconds = penalize_pending_captcha(user_id)
+            except (RuntimeError, requests.RequestException, ValueError, TypeError):
+                print(
+                    f"captcha penalty failed: user={user_id}",
+                    flush=True,
+                )
+                continue
+            multiplier = f" x{strike_count}" if strike_count > 1 else ""
+            message = f"🤖 {label} — бот{multiplier}\n+{penalty_seconds} секунд к задержке"
         try:
-            send_message(CAPTCHA_ALERT_CHAT_ID, message)
+            if message_id is not None:
+                try:
+                    edit_captcha_message(message_id, message)
+                except TelegramAPIError as exc:
+                    if "message is not modified" not in exc.description.lower():
+                        message_id = send_captcha_topic_message(message)
+            else:
+                message_id = send_captcha_topic_message(message)
         except (RuntimeError, requests.RequestException):
             print(
                 f"captcha notification failed: chat={CAPTCHA_ALERT_CHAT_ID} user={user_id} status={status}",
                 flush=True,
             )
             continue
+        if message_id is not None:
+            database.hset(CAPTCHA_NOTIFICATION_MESSAGE_KEY, notification_id, str(message_id))
         database.hset(CAPTCHA_NOTIFICATION_KEY, notification_id, marker)
         print(
             f"captcha notification sent: chat={CAPTCHA_ALERT_CHAT_ID} user={user_id} status={status}",
@@ -705,22 +843,23 @@ def notification_topic_id(category: str) -> int:
     if not topic:
         raise RuntimeError("Unknown trophy notification category")
     topic_name, topic_key = topic
+    chat_id = CAPTCHA_ALERT_CHAT_ID if category == "captcha" else TROPHY_ALERT_CHAT_ID
     cached = database.get(topic_key)
     if cached and str(cached).isdigit():
         return int(cached)
-    chat = call("getChat", {"chat_id": TROPHY_ALERT_CHAT_ID}).get("result", {})
+    chat = call("getChat", {"chat_id": chat_id}).get("result", {})
     if not chat.get("is_forum"):
-        raise RuntimeError("Trophy notification chat is not a forum")
+        raise RuntimeError("Notification chat is not a forum")
     result = call(
         "createForumTopic",
-        {"chat_id": TROPHY_ALERT_CHAT_ID, "name": topic_name},
+        {"chat_id": chat_id, "name": topic_name},
     )
     topic_id = result.get("result", {}).get("message_thread_id")
     if not isinstance(topic_id, int) or topic_id <= 0:
         raise RuntimeError("Telegram returned an invalid forum topic")
     database.set(topic_key, str(topic_id))
     print(
-        f"notification forum topic created: category={category} chat={TROPHY_ALERT_CHAT_ID} topic={topic_id}",
+        f"notification forum topic created: category={category} chat={chat_id} topic={topic_id}",
         flush=True,
     )
     return topic_id

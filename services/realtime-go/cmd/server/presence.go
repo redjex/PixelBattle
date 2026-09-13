@@ -32,6 +32,15 @@ func (p *appPresence) Count() int64 {
 	return int64(len(p.users))
 }
 
+func (p *appPresence) IsOnline(userID int64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	p.prune(now)
+	_, ok := p.users[userID]
+	return ok
+}
+
 func (p *appPresence) prune(now time.Time) {
 	cutoff := now.Add(-p.ttl)
 	for userID, seenAt := range p.users {

@@ -10,6 +10,7 @@ import (
 	"log"
 	"math/rand/v2"
 	"pixelbattle/realtime/internal/domain"
+	"strings"
 	"sync"
 	"time"
 )
@@ -203,7 +204,7 @@ CREATE TABLE IF NOT EXISTS trophy_nft_plan (
 	winner_user_id text
 );
 ALTER TABLE trophy_nft_plan DROP CONSTRAINT IF EXISTS trophy_nft_plan_sequence_check;
-ALTER TABLE trophy_nft_plan ADD CONSTRAINT trophy_nft_plan_sequence_check CHECK (sequence BETWEEN 1 AND 100);
+ALTER TABLE trophy_nft_plan ADD CONSTRAINT trophy_nft_plan_sequence_check CHECK (sequence > 0);
 CREATE TABLE IF NOT EXISTS trophy_nft_winners (
  trophy_id text PRIMARY KEY,
  user_id text NOT NULL,
@@ -914,24 +915,6 @@ func (w *Writer) ResetTrophies(ctx context.Context, telegramID string) (bool, er
 	if err := tx.QueryRow(ctx, `SELECT id FROM trophy_drop_state WHERE id=1 FOR UPDATE`).Scan(&stateID); err != nil {
 		return false, err
 	}
-	rows, err := tx.Query(ctx, `SELECT trophy_id FROM trophy_nft_winners WHERE user_id=$1`, telegramID)
-	if err != nil {
-		return false, err
-	}
-	var plannedTrophies []string
-	for rows.Next() {
-		var trophyID string
-		if err := rows.Scan(&trophyID); err != nil {
-			rows.Close()
-			return false, err
-		}
-		plannedTrophies = append(plannedTrophies, trophyID)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return false, err
-	}
-	rows.Close()
 	tag, err := tx.Exec(ctx, `UPDATE profiles SET prizes='[]'::jsonb,updated_at=NOW() WHERE telegram_id=$1`, telegramID)
 	if err != nil || tag.RowsAffected() != 1 {
 		return false, err
@@ -942,17 +925,28 @@ func (w *Writer) ResetTrophies(ctx context.Context, telegramID string) (bool, er
 	if _, err := tx.Exec(ctx, `DELETE FROM trophy_winners WHERE user_id=$1`, telegramID); err != nil {
 		return false, err
 	}
-	for _, trophyID := range plannedTrophies {
-		if _, err := tx.Exec(ctx, `UPDATE trophy_nft_plan SET claimed_at=NULL,winner_user_id=NULL WHERE trophy_id=$1`, trophyID); err != nil {
-			return false, err
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM trophy_nft_winners WHERE trophy_id=$1`, trophyID); err != nil {
-			return false, err
-		}
+	if _, err := tx.Exec(ctx, `DELETE FROM trophy_reward_assignments WHERE user_id=$1`, telegramID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM trophy_reward_requests WHERE user_id=$1`, telegramID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE trophy_nft_plan SET claimed_at=NULL,winner_user_id=NULL WHERE winner_user_id=$1`, telegramID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM trophy_nft_winners WHERE user_id=$1`, telegramID); err != nil {
+		return false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
+	w.rewardMu.Lock()
+	for key := range w.rewardCache {
+		if strings.HasPrefix(key, telegramID+"\x00") {
+			delete(w.rewardCache, key)
+		}
+	}
+	w.rewardMu.Unlock()
 	return true, nil
 }
 
@@ -1001,6 +995,7 @@ var trophyDefinitions = []trophyDefinition{
 	{TrophyPrize: TrophyPrize{ID: "vice-cream-227533", Name: "ViceCream #227533", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
 	{TrophyPrize: TrophyPrize{ID: "vice-cream-428029", Name: "ViceCream #428029", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
 	{TrophyPrize: TrophyPrize{ID: "chill-flame-303522", Name: "ChillFlame #303522", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
+	{TrophyPrize: TrophyPrize{ID: "vice-cream-10", Name: "ViceCream", Total: 4}, Weight: 4, Cap: 1, Rarity: "legendary"},
 }
 
 // Per-account rarity caps: how many trophies of each rarity one account may
@@ -1066,7 +1061,7 @@ func nftInventoryDropChance(counts map[string]int) float64 {
 }
 
 func shuffledNFTOutcomes(partsPerNFT int) []string {
-	outcomes := make([]string, 0, 5*partsPerNFT)
+	outcomes := make([]string, 0)
 	for _, definition := range trophyDefinitions {
 		if definition.Cap != 1 {
 			continue
@@ -1225,7 +1220,25 @@ GROUP BY campaign.starts_at,campaign.ends_at`).Scan(&status.StartsAt, &status.En
 	return status, err
 }
 
+var trophyExcludedUserIDs = map[string]struct{}{
+	"613263066": {}, // @volks_bagged
+	"773016303": {}, // @devconfig
+	"796632015": {}, // @mrchopra10
+	"820593275": {},
+	"882199385": {}, // @dotj2
+	"972232344": {}, // @kavikavon
+	"991531836": {}, // @d2rok
+}
+
+func trophyUserExcluded(userID string) bool {
+	_, excluded := trophyExcludedUserIDs[userID]
+	return excluded
+}
+
 func (w *Writer) ClaimTrophyPart(ctx context.Context, userID string, now time.Time, online int64) (*TrophyClaim, error) {
+	if trophyUserExcluded(userID) {
+		return nil, nil
+	}
 	tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err
@@ -1277,7 +1290,7 @@ WHERE prize->>'id'=$1
   AND (prize->>'collectedParts')::int < $2
 ORDER BY (prize->>'collectedParts')::int DESC,updated_at ASC
 LIMIT 1`, plannedID, 4).Scan(&leaderID)
-			if err == nil {
+			if err == nil && !trophyUserExcluded(leaderID) {
 				recipientID = leaderID
 			} else if err != pgx.ErrNoRows {
 				return nil, err
@@ -1524,14 +1537,14 @@ func (w *Writer) RestoreBoard(ctx context.Context, boardID string) ([]domain.Boa
 	for _, pixel := range pixels {
 		cells[[2]int{pixel.X, pixel.Y}] = pixel
 	}
-	rows, err := w.pool.Query(ctx, `SELECT b.x,b.y,b.color,b.version,b.updated_by,COALESCE(p.display_name,''),COALESCE(p.username,''),COALESCE(p.photo_url,''),b.frozen_until FROM board_pixels b LEFT JOIN profiles p ON p.telegram_id=b.updated_by WHERE b.board_id=$1 AND b.version>$2`, boardID, floor)
+	rows, err := w.pool.Query(ctx, `SELECT b.x,b.y,b.color,b.version,b.updated_by,COALESCE(p.display_name,''),COALESCE(p.username,''),COALESCE(p.photo_url,''),b.frozen_until,b.updated_at FROM board_pixels b LEFT JOIN profiles p ON p.telegram_id=b.updated_by WHERE b.board_id=$1 AND b.version>$2`, boardID, floor)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p domain.BoardPixel
-		if err := rows.Scan(&p.X, &p.Y, &p.Color, &p.Version, &p.Author.ID, &p.Author.DisplayName, &p.Author.Username, &p.Author.PhotoURL, &p.FrozenUntil); err != nil {
+		if err := rows.Scan(&p.X, &p.Y, &p.Color, &p.Version, &p.Author.ID, &p.Author.DisplayName, &p.Author.Username, &p.Author.PhotoURL, &p.FrozenUntil, &p.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		cells[[2]int{p.X, p.Y}] = p

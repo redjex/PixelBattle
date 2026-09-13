@@ -86,7 +86,13 @@ export function CaptchaOverlay({ active, onSolved }: { active: boolean; onSolved
   if (!active) return null;
   return (
     <div className="captcha-backdrop" role="presentation">
-      <section className="captcha-card" role="dialog" aria-modal="true" aria-labelledby="captcha-title">
+      <section
+        className="captcha-card"
+        data-captcha-version="5"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="captcha-title"
+      >
         <h2 id="captcha-title">Подтвердите, что вы человек</h2>
         <p>Введите пять символов с картинки</p>
         {challenge

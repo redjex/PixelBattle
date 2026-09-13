@@ -58,6 +58,7 @@ def test_captcha_status_changes_are_sent_once_to_alert_group():
                 "userId": "789",
                 "status": "suspicious",
                 "updatedAt": "2026-09-11T10:00:00Z",
+                "online": True,
             },
             {
                 "userId": "456",
@@ -67,34 +68,38 @@ def test_captcha_status_changes_are_sent_once_to_alert_group():
         ]
     }
     usernames = {"789": "suspect", "456": "human"}
-    markers = {}
+    hashes = {
+        bot.CAPTCHA_NOTIFICATION_KEY: {},
+        bot.CAPTCHA_NOTIFICATION_MESSAGE_KEY: {},
+    }
 
     def hget(key, field):
         if key == bot.USER_ID_KEY:
             return usernames.get(field)
-        return markers.get(field)
+        return hashes.get(key, {}).get(field)
 
     def hset(key, field, value):
-        assert key == bot.CAPTCHA_NOTIFICATION_KEY
-        markers[field] = value
+        hashes[key][field] = value
 
-    with patch.object(bot, "realtime_request", return_value=response) as request, patch.object(
+    with patch.object(bot, "CONFIRMED_BOT_USERNAMES", {}), patch.object(
+        bot, "ensure_captcha_topic_visible"
+    ), patch.object(
+        bot, "realtime_request", return_value=response
+    ) as request, patch.object(
         bot.database, "hget", side_effect=hget
     ), patch.object(bot.database, "hset", side_effect=hset), patch.object(
-        bot, "send_message"
+        bot, "penalize_pending_captcha", return_value=(1, 5)
+    ), patch.object(bot, "notification_topic_id", return_value=77), patch.object(
+        bot, "send_message", return_value=88
     ) as send_message:
         bot.notify_admins_about_captcha_statuses()
         bot.notify_admins_about_captcha_statuses()
 
     assert request.call_count == 2
-    assert send_message.call_count == 2
-    send_message.assert_any_call(
+    send_message.assert_called_once_with(
         bot.CAPTCHA_ALERT_CHAT_ID,
-        "⚠️ @suspect (ID 789) не прошёл капчу — пользователь под подозрением.",
-    )
-    send_message.assert_any_call(
-        bot.CAPTCHA_ALERT_CHAT_ID,
-        "✅ @human (ID 456) прошёл капчу — человек чистый.",
+        "🤖 @suspect (ID 789) — бот\n+5 секунд к задержке",
+        message_thread_id=77,
     )
 
 
@@ -109,7 +114,11 @@ def test_suspicious_notification_waits_one_minute():
             }
         ]
     }
-    with patch.object(bot, "realtime_request", return_value=response), patch.object(
+    with patch.object(bot, "CONFIRMED_BOT_USERNAMES", {}), patch.object(
+        bot, "ensure_captcha_topic_visible"
+    ), patch.object(
+        bot, "realtime_request", return_value=response
+    ), patch.object(
         bot.time, "time", return_value=1000
     ), patch.object(bot, "send_message") as send_message:
         bot.notify_admins_about_captcha_statuses()

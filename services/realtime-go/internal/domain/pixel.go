@@ -42,4 +42,5 @@ type BoardPixel struct {
 	Version     int64       `json:"version"`
 	Author      PixelAuthor `json:"author"`
 	FrozenUntil *time.Time  `json:"frozenUntil,omitempty"`
+	UpdatedAt   time.Time   `json:"updatedAt,omitempty"`
 }

@@ -365,3 +365,18 @@ func TestHiddenUsernameProfileOnlyExposesNameAndAvatar(t *testing.T) {
 		}
 	}
 }
+
+func TestRapidForeignRepaintDetection(t *testing.T) {
+	now := time.Unix(100, 0)
+	pixel := domain.BoardPixel{Author: domain.PixelAuthor{ID: "other"}, UpdatedAt: now.Add(-time.Second)}
+	if !isRapidForeignRepaint(pixel, "player", now) {
+		t.Fatal("fresh foreign repaint was not detected")
+	}
+	if isRapidForeignRepaint(pixel, "other", now) {
+		t.Fatal("player's own fresh pixel was treated as a foreign repaint")
+	}
+	pixel.UpdatedAt = now.Add(-rapidForeignRepaintWindow - time.Millisecond)
+	if isRapidForeignRepaint(pixel, "player", now) {
+		t.Fatal("old foreign pixel was treated as a rapid repaint")
+	}
+}

@@ -26,9 +26,20 @@ func TestTrophyDropChanceUsesOnlineAndLocalTime(t *testing.T) {
 	}
 }
 
+func TestKnownBotAccountsAreExcludedFromTrophyDrops(t *testing.T) {
+	for _, userID := range []string{"613263066", "773016303", "796632015", "820593275", "882199385", "972232344", "991531836"} {
+		if !trophyUserExcluded(userID) {
+			t.Fatalf("known bot %s is still eligible for trophies", userID)
+		}
+	}
+	if trophyUserExcluded("123456789") {
+		t.Fatal("ordinary player was excluded from trophies")
+	}
+}
+
 func TestTrophyRarityAndSupplyGrid(t *testing.T) {
-	if len(trophyDefinitions) != 15 {
-		t.Fatalf("expected 15 trophy definitions, got %d", len(trophyDefinitions))
+	if len(trophyDefinitions) != 16 {
+		t.Fatalf("expected 16 trophy definitions, got %d", len(trophyDefinitions))
 	}
 	for _, definition := range trophyDefinitions {
 		switch definition.ID {
@@ -82,6 +93,7 @@ func TestTrophyRarityGridMatchesDefinitions(t *testing.T) {
 		"vice-cream-227533":     "legendary",
 		"vice-cream-428029":     "legendary",
 		"chill-flame-303522":    "legendary",
+		"vice-cream-10":         "legendary",
 	}
 	for _, definition := range trophyDefinitions {
 		want, ok := rarityByID[definition.ID]
@@ -142,8 +154,8 @@ func TestTrophyAccountLimitReached(t *testing.T) {
 
 func TestNFTOutcomePlanContainsEveryRequiredPart(t *testing.T) {
 	outcomes := shuffledNFTOutcomes(nftPartsPerCampaign)
-	if len(outcomes) != 100 {
-		t.Fatalf("expected 100 NFT opportunities, got %d", len(outcomes))
+	if len(outcomes) != 120 {
+		t.Fatalf("expected 120 NFT opportunities, got %d", len(outcomes))
 	}
 	counts := make(map[string]int)
 	for _, trophyID := range outcomes {

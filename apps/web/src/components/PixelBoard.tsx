@@ -27,10 +27,35 @@ function renderTemplate(image: HTMLImageElement, width: number, height: number) 
   canvas.height = height;
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) return canvas;
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = 'high';
-  context.drawImage(image, 0, 0, width, height);
-  const data = context.getImageData(0, 0, width, height);
+
+  const sourceCanvas = document.createElement('canvas');
+  sourceCanvas.width = image.naturalWidth;
+  sourceCanvas.height = image.naturalHeight;
+  const sourceContext = sourceCanvas.getContext('2d', { willReadFrequently: true });
+  let data: ImageData;
+
+  if (sourceContext) {
+    sourceContext.drawImage(image, 0, 0);
+    const sourceData = sourceContext.getImageData(0, 0, image.naturalWidth, image.naturalHeight);
+    data = context.createImageData(width, height);
+    for (let y = 0; y < height; y += 1) {
+      const sourceY = Math.min(image.naturalHeight - 1, Math.floor((y + 0.5) * image.naturalHeight / height));
+      for (let x = 0; x < width; x += 1) {
+        const sourceX = Math.min(image.naturalWidth - 1, Math.floor((x + 0.5) * image.naturalWidth / width));
+        const sourceIndex = (sourceY * image.naturalWidth + sourceX) * 4;
+        const targetIndex = (y * width + x) * 4;
+        data.data[targetIndex] = sourceData.data[sourceIndex];
+        data.data[targetIndex + 1] = sourceData.data[sourceIndex + 1];
+        data.data[targetIndex + 2] = sourceData.data[sourceIndex + 2];
+        data.data[targetIndex + 3] = sourceData.data[sourceIndex + 3];
+      }
+    }
+  } else {
+    context.imageSmoothingEnabled = false;
+    context.drawImage(image, 0, 0, width, height);
+    data = context.getImageData(0, 0, width, height);
+  }
+
   for (let index = 0; index < data.data.length; index += 4) {
     if (data.data[index + 3] < 32) { data.data[index + 3] = 0; continue; }
     const red = data.data[index];
@@ -72,7 +97,10 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   const templateResizeIconRef = useRef<HTMLImageElement | null>(null);
   const templateWatchIconRef = useRef<HTMLImageElement | null>(null);
   const templateWatchPointerRef = useRef<number | null>(null);
-  const templateTemporarilyHiddenRef = useRef(false);
+  const templateHoldToShowRef = useRef(false);
+  const templatePointerRevealRef = useRef(false);
+  const templateSpaceRevealRef = useRef(false);
+  const lastTemplateWatchTapRef = useRef(0);
   const boardSizeRef = useRef({ width: DEFAULT_BOARD_SIZE, height: DEFAULT_BOARD_SIZE });
   const panRef = useRef({ x: 0, y: 0 });
   const dragRef = useRef<{ x: number; y: number; cellX: number; cellY: number; moved: boolean; longPressed: boolean; pointerId: number } | null>(null);
@@ -207,7 +235,10 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     templateRef.current = null;
     templateGestureRef.current = null;
     templateWatchPointerRef.current = null;
-    templateTemporarilyHiddenRef.current = false;
+    templateHoldToShowRef.current = false;
+    templatePointerRevealRef.current = false;
+    templateSpaceRevealRef.current = false;
+    lastTemplateWatchTapRef.current = 0;
     setRevision((value) => value + 1);
     if (!templateImageUrl || !boardDimensions) return;
     let disposed = false;
@@ -380,7 +411,10 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
         const templateVisibleBottom = Math.min(template.height, Math.ceil((rect.height - templateTop) / cell));
         const templateVisibleWidth = templateVisibleRight - templateVisibleLeft;
         const templateVisibleHeight = templateVisibleBottom - templateVisibleTop;
-        if (templateVisibleWidth > 0 && templateVisibleHeight > 0 && !templateTemporarilyHiddenRef.current) {
+        const templateVisible = templateHoldToShowRef.current
+          ? templatePointerRevealRef.current || templateSpaceRevealRef.current
+          : templateWatchPointerRef.current === null;
+        if (templateVisibleWidth > 0 && templateVisibleHeight > 0 && templateVisible) {
           context.save();
           context.globalAlpha = Math.max(0, Math.min(1, templateOpacity));
           context.imageSmoothingEnabled = false;
@@ -520,7 +554,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
       const watching = handles && Math.hypot(localX - handles.watch.x, localY - handles.watch.y) <= hitRadius;
       if (watching) {
         templateWatchPointerRef.current = event.pointerId;
-        templateTemporarilyHiddenRef.current = true;
+        templatePointerRevealRef.current = templateHoldToShowRef.current;
         dragRef.current = null;
         scheduleViewRender();
         return;
@@ -687,7 +721,18 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   function handlePointerUp(event: React.PointerEvent<HTMLCanvasElement>) {
     if (templateWatchPointerRef.current === event.pointerId) {
       templateWatchPointerRef.current = null;
-      templateTemporarilyHiddenRef.current = false;
+      templatePointerRevealRef.current = false;
+      if (event.type === 'pointerup') {
+        const previousTap = lastTemplateWatchTapRef.current;
+        if (previousTap > 0 && event.timeStamp - previousTap <= 450) {
+          templateHoldToShowRef.current = !templateHoldToShowRef.current;
+          templateSpaceRevealRef.current = false;
+          lastTemplateWatchTapRef.current = 0;
+          navigator.vibrate?.(25);
+        } else {
+          lastTemplateWatchTapRef.current = event.timeStamp;
+        }
+      }
       scheduleViewRender();
       return;
     }
@@ -795,6 +840,68 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     window.addEventListener('wheel', handleCtrlWheel, { capture: true, passive: false });
     return () => window.removeEventListener('wheel', handleCtrlWheel, { capture: true });
   }, [onZoom]);
+
+  useEffect(() => {
+    const handleTemplateSpace = (event: KeyboardEvent) => {
+      const isSpace = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
+      if (!isSpace || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.type === 'keyup') {
+        if (!templateSpaceRevealRef.current) return;
+        event.preventDefault();
+        templateSpaceRevealRef.current = false;
+        scheduleViewRender();
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, button, [contenteditable="true"]')) return;
+      if (!templateRef.current || !templateHoldToShowRef.current) return;
+      event.preventDefault();
+      if (templateSpaceRevealRef.current) return;
+      templateSpaceRevealRef.current = true;
+      scheduleViewRender();
+    };
+    const hideAfterBlur = () => {
+      if (!templateSpaceRevealRef.current) return;
+      templateSpaceRevealRef.current = false;
+      scheduleViewRender();
+    };
+    window.addEventListener('keydown', handleTemplateSpace, true);
+    window.addEventListener('keyup', handleTemplateSpace, true);
+    window.addEventListener('blur', hideAfterBlur);
+    return () => {
+      window.removeEventListener('keydown', handleTemplateSpace, true);
+      window.removeEventListener('keyup', handleTemplateSpace, true);
+      window.removeEventListener('blur', hideAfterBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleArrowSelection = (event: KeyboardEvent) => {
+      const movement: Record<string, { x: number; y: number }> = {
+        ArrowUp: { x: 0, y: -1 },
+        ArrowDown: { x: 0, y: 1 },
+        ArrowLeft: { x: -1, y: 0 },
+        ArrowRight: { x: 1, y: 0 },
+      };
+      const delta = movement[event.key];
+      if (!delta || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const selected = selectedRef.current;
+      if (!selected) return;
+      event.preventDefault();
+      const { width, height } = boardSizeRef.current;
+      const x = Math.max(0, Math.min(width - 1, selected.x + delta.x));
+      const y = Math.max(0, Math.min(height - 1, selected.y + delta.y));
+      if (x === selected.x && y === selected.y) return;
+      selectedRef.current = { x, y };
+      onSelectPixel({ x, y });
+      onInspectPixel(pixelsRef.current.get(`${x}:${y}`) ?? null);
+      scheduleViewRender();
+    };
+    window.addEventListener('keydown', handleArrowSelection);
+    return () => window.removeEventListener('keydown', handleArrowSelection);
+  }, [onInspectPixel, onSelectPixel]);
 
   return (
     <div className="board-wrap">
