@@ -37,17 +37,17 @@ func TestCooldownAllowsOncePerBoardAndUser(t *testing.T) {
 	}
 }
 
-func TestCooldownAddsOneIdlePenalty(t *testing.T) {
+func TestCooldownDoesNotIncreaseAfterIdle(t *testing.T) {
 	cooldown := NewCooldown()
 	now := time.Unix(100, 0)
 	cooldown.Allow("user", "main", 5*time.Second, now)
-	if allowed, _, effective := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute)); !allowed || effective != 10*time.Second {
-		t.Fatalf("idle placement effective cooldown = %s, allowed=%v", effective, allowed)
+	if allowed, _, effective := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute)); !allowed || effective != 5*time.Second {
+		t.Fatalf("idle placement changed cooldown: effective=%s allowed=%v", effective, allowed)
 	}
-	if allowed, retry, _ := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute+5*time.Second)); allowed || retry != 5*time.Second {
-		t.Fatalf("idle penalty was not enforced: allowed=%v retry=%s", allowed, retry)
+	if allowed, retry, _ := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute+4*time.Second)); allowed || retry != time.Second {
+		t.Fatalf("configured cooldown was not enforced: allowed=%v retry=%s", allowed, retry)
 	}
-	if allowed, _, effective := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute+10*time.Second)); !allowed || effective != 5*time.Second {
-		t.Fatalf("idle penalty repeated unexpectedly: effective=%s allowed=%v", effective, allowed)
+	if allowed, _, effective := cooldown.Allow("user", "main", 5*time.Second, now.Add(time.Minute+5*time.Second)); !allowed || effective != 5*time.Second {
+		t.Fatalf("configured cooldown changed: effective=%s allowed=%v", effective, allowed)
 	}
 }
