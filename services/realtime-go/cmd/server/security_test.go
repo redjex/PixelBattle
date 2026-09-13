@@ -182,10 +182,12 @@ func TestSecurityMiddleware(t *testing.T) {
 type testAccessPolicy struct {
 	enabled bool
 	admins  map[int64]bool
+	banned  map[int64]bool
 }
 
-func (p testAccessPolicy) IsTestMode() bool      { return p.enabled }
-func (p testAccessPolicy) IsAdmin(id int64) bool { return p.admins[id] }
+func (p testAccessPolicy) IsTestMode() bool       { return p.enabled }
+func (p testAccessPolicy) IsAdmin(id int64) bool  { return p.admins[id] }
+func (p testAccessPolicy) IsBanned(id int64) bool { return p.banned[id] }
 
 func TestMaintenanceAccessPolicy(t *testing.T) {
 	policy := testAccessPolicy{enabled: true, admins: map[int64]bool{123: true}}
@@ -201,6 +203,13 @@ func TestMaintenanceAccessPolicy(t *testing.T) {
 	policy.enabled = false
 	if !maintenanceAllows("/api/boards/main", 456, policy) {
 		t.Fatal("normal access remained blocked after test mode")
+	}
+	policy.banned = map[int64]bool{456: true}
+	if maintenanceAllows("/api/boards/main", 456, policy) {
+		t.Fatal("banned user received game data")
+	}
+	if !maintenanceAllows("/api/boards/session", 456, policy) {
+		t.Fatal("banned user cannot read denial status")
 	}
 }
 

@@ -20,12 +20,14 @@ const (
 	peakOnlineKey     = "pixelbattle:online:peak"
 	usernameKey       = "pixelbattle:users:username"
 	userIDKey         = "pixelbattle:users:id"
+	bannedKey         = "pixelbattle:access:banned"
 )
 
 type Store struct {
 	client            *redis.Client
 	mu                sync.RWMutex
 	admins            map[int64]struct{}
+	banned            map[int64]struct{}
 	bypassed          map[int64]struct{}
 	cooldowns         map[int64]time.Duration
 	globalCooldown    time.Duration
@@ -51,7 +53,7 @@ func ParseAdminIDs(raw string) ([]int64, error) {
 }
 
 func New(ctx context.Context, rawURL string, adminIDs []int64) (*Store, error) {
-	store := &Store{admins: make(map[int64]struct{}, len(adminIDs)), bypassed: make(map[int64]struct{}, len(adminIDs)), cooldowns: make(map[int64]time.Duration)}
+	store := &Store{admins: make(map[int64]struct{}, len(adminIDs)), banned: make(map[int64]struct{}), bypassed: make(map[int64]struct{}, len(adminIDs)), cooldowns: make(map[int64]time.Duration)}
 	for _, id := range adminIDs {
 		store.admins[id] = struct{}{}
 	}
@@ -175,6 +177,13 @@ func (s *Store) IsAdmin(id int64) bool {
 	return ok
 }
 
+func (s *Store) IsBanned(id int64) bool {
+	s.mu.RLock()
+	_, ok := s.banned[id]
+	s.mu.RUnlock()
+	return ok
+}
+
 func (s *Store) IsTestMode() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -224,6 +233,7 @@ func (s *Store) refresh(ctx context.Context) error {
 		return nil
 	}
 	next := make(map[int64]struct{})
+	nextBanned := make(map[int64]struct{})
 	nextCooldowns := make(map[int64]time.Duration)
 	var globalCooldown time.Duration
 	var hasGlobalCooldown bool
@@ -238,6 +248,15 @@ func (s *Store) refresh(ctx context.Context) error {
 		for _, value := range values {
 			if id, err := strconv.ParseInt(value, 10, 64); err == nil {
 				next[id] = struct{}{}
+			}
+		}
+		banned, err := s.client.SMembers(ctx, bannedKey).Result()
+		if err != nil {
+			return err
+		}
+		for _, value := range banned {
+			if id, err := strconv.ParseInt(value, 10, 64); err == nil && id > 0 {
+				nextBanned[id] = struct{}{}
 			}
 		}
 		custom, err := s.client.HGetAll(ctx, cooldownKey).Result()
@@ -276,6 +295,7 @@ func (s *Store) refresh(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	s.bypassed = next
+	s.banned = nextBanned
 	s.cooldowns = nextCooldowns
 	s.globalCooldown = globalCooldown
 	s.hasGlobalCooldown = hasGlobalCooldown

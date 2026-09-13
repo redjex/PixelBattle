@@ -263,6 +263,10 @@ func main() {
 		}
 		testMode := accessStore.IsTestMode()
 		isAdmin := accessStore.IsAdmin(telegramUser.ID)
+		if accessStore.IsBanned(telegramUser.ID) {
+			writeJSON(w, map[string]any{"testMode": testMode, "isAdmin": isAdmin, "accessAllowed": false, "banned": true})
+			return
+		}
 		if testMode && !isAdmin {
 			writeJSON(w, map[string]any{"testMode": true, "isAdmin": false, "accessAllowed": false})
 			return
@@ -1562,6 +1566,11 @@ func main() {
 			_ = conn.Close()
 			return
 		}
+		if accessStore.IsBanned(telegramUser.ID) {
+			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4403, "access denied"), time.Now().Add(time.Second))
+			_ = conn.Close()
+			return
+		}
 		if accessStore.IsTestMode() && !accessStore.IsAdmin(telegramUser.ID) {
 			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4403, "test mode enabled"), time.Now().Add(time.Second))
 			_ = conn.Close()
@@ -1593,7 +1602,7 @@ func main() {
 			if err := client.Conn.ReadJSON(&request); err != nil {
 				return
 			}
-			if !time.Now().Before(telegramUser.ExpiresAt) || !requestLimits.allow("user:"+identity, 240, time.Now()) || (accessStore.IsTestMode() && !accessStore.IsAdmin(telegramUser.ID)) {
+			if !time.Now().Before(telegramUser.ExpiresAt) || !requestLimits.allow("user:"+identity, 240, time.Now()) || accessStore.IsBanned(telegramUser.ID) || (accessStore.IsTestMode() && !accessStore.IsAdmin(telegramUser.ID)) {
 				return
 			}
 			func() {

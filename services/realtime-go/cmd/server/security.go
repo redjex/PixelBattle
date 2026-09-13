@@ -25,6 +25,7 @@ type trustedProxiesKey struct{}
 
 type appAccessPolicy interface {
 	IsAdmin(int64) bool
+	IsBanned(int64) bool
 	IsTestMode() bool
 }
 
@@ -194,7 +195,13 @@ func allowedMethods(path string) string {
 }
 
 func maintenanceAllows(path string, userID int64, policy appAccessPolicy) bool {
-	return policy == nil || !policy.IsTestMode() || policy.IsAdmin(userID) || path == "/api/boards/session"
+	if policy == nil {
+		return true
+	}
+	if policy.IsBanned(userID) {
+		return path == "/api/boards/session"
+	}
+	return !policy.IsTestMode() || policy.IsAdmin(userID) || path == "/api/boards/session"
 }
 
 func secureHandler(next http.Handler, adminToken string, limits *rateLimiter, policy appAccessPolicy) http.Handler {

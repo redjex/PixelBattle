@@ -102,3 +102,14 @@ func TestAdminConfiguration(t *testing.T) {
 		t.Fatal("invalid Redis configuration silently accepted")
 	}
 }
+
+func TestBannedPlayerLookup(t *testing.T) {
+	s, err := New(context.Background(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.banned[456] = struct{}{}
+	if !s.IsBanned(456) || s.IsBanned(123) {
+		t.Fatal("unexpected banned-player lookup")
+	}
+}
