@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,7 @@ import (
 	"pixelbattle/realtime/internal/persistence"
 	"pixelbattle/realtime/internal/queue"
 	"pixelbattle/realtime/internal/realtime"
+	"pixelbattle/realtime/internal/shadowban"
 	"pixelbattle/realtime/internal/state"
 	"pixelbattle/realtime/internal/trophyrewards"
 )
@@ -92,6 +94,11 @@ func main() {
 	}
 	defer accessStore.Close()
 	go accessStore.Run(ctx)
+	shadowStore, err := shadowban.New(startupCtx, accessURL)
+	if err != nil {
+		log.Fatalf("shadow-ban store startup failed: %v", err)
+	}
+	defer shadowStore.Close()
 	if devMemory {
 		captchaGuard = antibot.New()
 	} else {
@@ -160,7 +167,7 @@ func main() {
 			}
 		}
 		boardStore.Restore("main", pixels)
-		version.Store(maximum)
+		version.Store(max(maximum, shadowStore.MaxVersion()))
 		go func() {
 			if err := writer.MonitorLease(ctx); err != nil {
 				log.Fatal(err)
@@ -184,7 +191,7 @@ func main() {
 		if writer == nil {
 			return
 		}
-		claim, err := writer.ClaimTrophyPart(ctx, userID, time.Now().UTC(), presence.Count())
+		claim, err := writer.ClaimTrophyPart(ctx, userID, time.Now().UTC(), publicOnlineCount(presence, shadowStore))
 		if err != nil {
 			log.Printf("trophy drop failed for user=%s: %v", userID, err)
 			return
@@ -232,14 +239,26 @@ func main() {
 		boardMu.Lock()
 		defer boardMu.Unlock()
 		// Board snapshots are protected just like WebSocket connections.
-		if _, err := telegramUserFromRequest(r); err != nil {
+		telegramUser, err := telegramUserFromRequest(r)
+		if err != nil {
 			http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
 			return
+		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
+		pixels := boardStore.Snapshot("main")
+		if shadowStore.IsBanned(identity) {
+			pixels = overlaySnapshot(pixels, shadowStore.Snapshot(identity))
 		}
 		w.Header().Set("Cache-Control", "private, no-cache")
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("compact") == "1" {
-			raw, compressed, err := boardCache.Payload(boardStore, boardWidth.Load(), boardHeight.Load())
+			var raw, compressed []byte
+			var err error
+			if shadowStore.IsBanned(identity) {
+				raw, compressed, err = compactSnapshotPayload(pixels, boardWidth.Load(), boardHeight.Load())
+			} else {
+				raw, compressed, err = boardCache.Payload(boardStore, boardWidth.Load(), boardHeight.Load())
+			}
 			if err != nil {
 				http.Error(w, "failed to build board snapshot", http.StatusInternalServerError)
 				return
@@ -253,7 +272,7 @@ func main() {
 			_, _ = w.Write(raw)
 			return
 		}
-		writeJSON(w, map[string]any{"id": "main", "width": boardWidth.Load(), "height": boardHeight.Load(), "pixels": publicSnapshot(boardStore.Snapshot("main"))})
+		writeJSON(w, map[string]any{"id": "main", "width": boardWidth.Load(), "height": boardHeight.Load(), "pixels": publicSnapshot(pixels)})
 	})
 	http.HandleFunc("/api/boards/session", func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -271,19 +290,20 @@ func main() {
 			writeJSON(w, map[string]any{"testMode": true, "isAdmin": false, "accessAllowed": false})
 			return
 		}
-		online := presence.Touch(telegramUser.ID)
+		presence.Touch(telegramUser.ID)
+		online := publicOnlineCount(presence, shadowStore)
 		if writer != nil {
 			if err := writer.UpsertProfile(r.Context(), profileFromTelegram(telegramUser)); err != nil {
 				log.Printf("profile upsert failed for user=%d: %v", telegramUser.ID, err)
 			}
 		}
+		identity := strconv.FormatInt(telegramUser.ID, 10)
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
 		inventory := persistence.Inventory{}
 		prizes := json.RawMessage("[]")
 		soldOutTrophies := []string{}
 		pendingItemRewards := []persistence.TrophyItemReward{}
 		if writer != nil {
-			identity := strconv.FormatInt(telegramUser.ID, 10)
 			inventory, _ = writer.Inventory(r.Context(), identity)
 			pendingItemRewards, _ = writer.PendingTrophyItemRewards(r.Context(), identity)
 			if storedPrizes, err := writer.Prizes(r.Context(), identity); err == nil {
@@ -295,7 +315,11 @@ func main() {
 				log.Printf("trophy availability failed: %v", err)
 			}
 		}
-		identity := strconv.FormatInt(telegramUser.ID, 10)
+		if clientPrizes, ok, err := shadowStore.ClientPrizes(r.Context(), identity); err != nil {
+			log.Printf("client trophy snapshot failed for user=%s: %v", identity, err)
+		} else if ok {
+			prizes = clientPrizes
+		}
 		writeJSON(w, map[string]any{"cooldownBypassed": userCooldown == 0, "cooldownMs": userCooldown.Milliseconds(), "paused": accessStore.IsPaused(), "inventory": inventory, "prizes": prizes, "pendingItemRewards": pendingItemRewards, "soldOutTrophies": soldOutTrophies, "online": online, "testMode": testMode, "isAdmin": isAdmin, "accessAllowed": true, "captchaRequired": captchaGuard.Required(identity, time.Now().UTC())})
 	})
 	http.HandleFunc("/api/boards/captcha", func(w http.ResponseWriter, r *http.Request) {
@@ -583,6 +607,11 @@ func main() {
 		now := time.Now().UTC()
 		var existingFreeze *time.Time
 		current, hasCurrent := boardStore.Pixel(request.BoardID, request.X, request.Y)
+		if shadowStore.IsBanned(identity) {
+			if privatePixel, ok := shadowStore.Pixel(identity, request.X, request.Y); ok {
+				current, hasCurrent = privatePixel, true
+			}
+		}
 		if hasCurrent && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
 			if current.Author.ID != identity {
 				w.Header().Set("Cache-Control", "no-store")
@@ -628,6 +657,24 @@ func main() {
 			}
 		}
 		event := domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: request.BoardID, X: request.X, Y: request.Y, Color: request.Color, OperationID: "server:" + id(), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil}
+		if shadowStore.IsBanned(identity) {
+			if err := shadowStore.Apply(r.Context(), identity, event); err != nil {
+				if freezeChargeUsed && writer != nil {
+					_ = writer.RefundFreezeCharge(r.Context(), identity)
+				}
+				http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			captchaRequired := captchaGuard.RecordPlacement(identity, now, userCooldown)
+			publicEvent := eventForClient(event)
+			payload, _ := json.Marshal(publicEvent)
+			hub.SendToUser(identity, payload)
+			publicEvent.CaptchaRequired = captchaRequired
+			publicEvent.CooldownMs = appliedCooldown.Milliseconds()
+			w.Header().Set("Cache-Control", "no-store")
+			writeJSON(w, publicEvent)
+			return
+		}
 		if err := eventQueue.Append(r.Context(), event); err != nil {
 			if freezeChargeUsed && writer != nil {
 				_ = writer.RefundFreezeCharge(r.Context(), identity)
@@ -649,7 +696,7 @@ func main() {
 		log.Printf("http placement accepted: user=%d x=%d y=%d version=%d", telegramUser.ID, event.X, event.Y, event.Version)
 		publicEvent := eventForClient(event)
 		payload, _ := json.Marshal(publicEvent)
-		hub.Broadcast(payload)
+		hub.BroadcastExcept(payload, shadowStore.UsersWithPixel(event.X, event.Y))
 		publicEvent.CaptchaRequired = captchaRequired
 		publicEvent.CooldownMs = appliedCooldown.Milliseconds()
 		w.Header().Set("Cache-Control", "no-store")
@@ -727,7 +774,13 @@ func main() {
 					continue
 				}
 				var frozenUntil *time.Time
-				if current, ok := boardStore.Pixel("main", x, y); ok && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
+				current, ok := boardStore.Pixel("main", x, y)
+				if shadowStore.IsBanned(identity) {
+					if privatePixel, exists := shadowStore.Pixel(identity, x, y); exists {
+						current, ok = privatePixel, true
+					}
+				}
+				if ok && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
 					if current.Author.ID != identity {
 						continue
 					}
@@ -741,7 +794,20 @@ func main() {
 			http.Error(w, "bomb has no available pixels", http.StatusLocked)
 			return
 		}
+		shadowed := shadowStore.IsBanned(identity)
 		for index, event := range events {
+			if shadowed {
+				if err := shadowStore.Apply(r.Context(), identity, event); err != nil {
+					if index == 0 {
+						_ = writer.RefundBomb(r.Context(), identity)
+					}
+					http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				payload, _ := json.Marshal(eventForClient(event))
+				hub.SendToUser(identity, payload)
+				continue
+			}
 			if err := eventQueue.Append(r.Context(), event); err != nil {
 				if index == 0 {
 					_ = writer.RefundBomb(r.Context(), identity)
@@ -752,10 +818,12 @@ func main() {
 			boardStore.Apply(event)
 			recorder.Record(event)
 			payload, _ := json.Marshal(eventForClient(event))
-			hub.Broadcast(payload)
+			hub.BroadcastExcept(payload, shadowStore.UsersWithPixel(event.X, event.Y))
 		}
 		captchaGuard.RecordPlacement(identity, now, userCooldown)
-		awardDueTrophy(r.Context(), identity, author)
+		if !shadowed {
+			awardDueTrophy(r.Context(), identity, author)
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory, "cooldownMs": appliedCooldown.Milliseconds()})
 	})
@@ -782,7 +850,11 @@ func main() {
 		}
 		// The in-memory board is authoritative and updates before the asynchronous
 		// PostgreSQL writer, so this value is both current and correct after clears/resizes.
-		stats.CurrentPixels = boardStore.CountByAuthor("main", userID)
+		if shadowStore.IsBanned(userID) {
+			stats.CurrentPixels = int64(len(shadowStore.Snapshot(userID)))
+		} else {
+			stats.CurrentPixels = boardStore.CountByAuthor("main", userID)
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, stats)
 	}
@@ -933,6 +1005,46 @@ func main() {
 			}
 		}
 		writeJSON(w, map[string]any{"width": request.Width, "height": request.Height})
+	})
+	http.HandleFunc("/api/admin/boards/main/pixel", func(w http.ResponseWriter, r *http.Request) {
+		x, xErr := strconv.Atoi(r.URL.Query().Get("x"))
+		y, yErr := strconv.Atoi(r.URL.Query().Get("y"))
+		if xErr != nil || yErr != nil || x < 0 || y < 0 || x >= int(boardWidth.Load()) || y >= int(boardHeight.Load()) {
+			http.Error(w, "invalid pixel coordinates", http.StatusBadRequest)
+			return
+		}
+		pixel, ok := boardStore.Pixel("main", x, y)
+		if !ok {
+			writeJSON(w, map[string]any{"x": x, "y": y, "occupied": false})
+			return
+		}
+		writeJSON(w, map[string]any{"x": x, "y": y, "occupied": true, "userId": pixel.Author.ID, "color": pixel.Color})
+	})
+	http.HandleFunc("/api/admin/shadow-bans", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeJSON(w, map[string]any{"userIds": shadowStore.List()})
+			return
+		}
+		boardMu.Lock()
+		defer boardMu.Unlock()
+		var request struct {
+			UserID string `json:"userId"`
+			Banned bool   `json:"banned"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid shadow-ban request", http.StatusBadRequest)
+			return
+		}
+		parsedID, err := strconv.ParseInt(request.UserID, 10, 64)
+		if err != nil || parsedID <= 0 {
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+		if err := shadowStore.Set(r.Context(), request.UserID, request.Banned); err != nil {
+			http.Error(w, "failed to save shadow-ban state", http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, map[string]any{"userId": request.UserID, "banned": request.Banned})
 	})
 	http.HandleFunc("/api/admin/boards/main/fill", func(w http.ResponseWriter, r *http.Request) {
 		boardMu.Lock()
@@ -1105,9 +1217,22 @@ func main() {
 			http.Error(w, "admin access required", http.StatusUnauthorized)
 			return
 		}
-		current := presence.Count()
+		userIDs := presence.Users()
+		current := int64(len(userIDs))
 		peak := accessStore.RecordOnlinePeak(r.Context(), current)
-		writeJSON(w, map[string]int64{"currentOnline": current, "peakOnline": peak})
+		players := make([]map[string]string, 0, len(userIDs))
+		for _, userID := range userIDs {
+			identity := strconv.FormatInt(userID, 10)
+			entry := map[string]string{"userId": identity}
+			if writer != nil {
+				if profile, err := writer.Profile(r.Context(), identity); err == nil {
+					entry["username"] = profile.Username
+					entry["displayName"] = profile.DisplayName
+				}
+			}
+			players = append(players, entry)
+		}
+		writeJSON(w, map[string]any{"currentOnline": current, "peakOnline": peak, "players": players})
 	})
 	http.HandleFunc("/api/admin/recording", func(w http.ResponseWriter, r *http.Request) {
 		if !adminAuthorized(r, adminAPIToken) {
@@ -1390,6 +1515,9 @@ func main() {
 			boardStore.Clear("main")
 			version.Store(0)
 			err = writer.WriteSnapshot(r.Context(), "main", nil, 0, persistence.BoardSize{Width: int(boardWidth.Load()), Height: int(boardHeight.Load())})
+			if err == nil {
+				err = shadowStore.ClearOverlays(r.Context())
+			}
 		}
 		boardMu.Unlock()
 		if err != nil {
@@ -1588,10 +1716,16 @@ func main() {
 		}
 		accessStore.RegisterUser(r.Context(), telegramUser.ID, telegramUser.Username)
 		identity := strconv.FormatInt(telegramUser.ID, 10)
+		// Presence is keyed by Telegram user ID, not by socket. Registering the
+		// authenticated user here keeps WS-only sessions visible and prevents
+		// opening multiple sockets from inflating the online counter.
+		presence.Touch(telegramUser.ID)
 		client := hub.Add(conn, identity)
 		if client == nil {
 			return
 		}
+		captchaGuard.Connect(identity, time.Now().UTC())
+		defer captchaGuard.Disconnect(identity, time.Now().UTC())
 		accessStore.RecordOnlinePeak(ctx, presence.Count())
 		defer hub.Remove(client)
 		conn.SetReadLimit(1024)
@@ -1626,6 +1760,11 @@ func main() {
 				now := time.Now().UTC()
 				var existingFreeze *time.Time
 				current, hasCurrent := boardStore.Pixel(request.BoardID, request.X, request.Y)
+				if shadowStore.IsBanned(identity) {
+					if privatePixel, ok := shadowStore.Pixel(identity, request.X, request.Y); ok {
+						current, hasCurrent = privatePixel, true
+					}
+				}
 				if hasCurrent && current.FrozenUntil != nil && now.Before(*current.FrozenUntil) {
 					if current.Author.ID != identity {
 						_ = client.SendJSON(map[string]any{"type": "error", "code": "pixel_frozen", "frozenUntil": current.FrozenUntil})
@@ -1668,6 +1807,23 @@ func main() {
 					}
 				}
 				event := domain.PixelEvent{Type: "pixel_placed", EventID: id(), BoardID: request.BoardID, X: request.X, Y: request.Y, Color: request.Color, OperationID: "server:" + id(), UserID: identity, Author: author, Version: version.Add(1), CreatedAt: now, FrozenUntil: frozenUntil}
+				if shadowStore.IsBanned(identity) {
+					if err := shadowStore.Apply(r.Context(), identity, event); err != nil {
+						if freezeChargeUsed && writer != nil {
+							_ = writer.RefundFreezeCharge(r.Context(), identity)
+						}
+						_ = client.SendJSON(map[string]any{"type": "error", "code": "queue_unavailable"})
+						return
+					}
+					captchaRequired := captchaGuard.RecordPlacement(identity, now, userCooldown)
+					_ = client.SendJSON(eventForClient(event))
+					if captchaRequired {
+						_ = client.SendJSON(map[string]any{"type": "captcha_required"})
+					} else if appliedCooldown != userCooldown {
+						_ = client.SendJSON(map[string]any{"type": "cooldown_updated", "cooldownMs": appliedCooldown.Milliseconds()})
+					}
+					return
+				}
 				if err := eventQueue.Append(r.Context(), event); err != nil {
 					if freezeChargeUsed && writer != nil {
 						_ = writer.RefundFreezeCharge(r.Context(), identity)
@@ -1675,6 +1831,11 @@ func main() {
 					_ = client.SendJSON(map[string]any{"type": "error", "code": "queue_unavailable"})
 					return
 				}
+				// A successful placement is an explicit activity signal over the
+				// authenticated WS connection. Touching the user (rather than a
+				// connection ID) refreshes presence without counting duplicate
+				// sockets for the same Telegram account.
+				presence.Touch(telegramUser.ID)
 				boardStore.Apply(event)
 				recorder.Record(event)
 				captchaRequired := captchaGuard.RecordPlacement(identity, now, userCooldown)
@@ -1686,7 +1847,7 @@ func main() {
 					_ = checkpoint(r.Context())
 				}
 				payload, _ := json.Marshal(eventForClient(event))
-				hub.Broadcast(payload)
+				hub.BroadcastExcept(payload, shadowStore.UsersWithPixel(event.X, event.Y))
 				if captchaRequired {
 					_ = client.SendJSON(map[string]any{"type": "captcha_required"})
 				} else if appliedCooldown != userCooldown {
@@ -1938,6 +2099,56 @@ func (c *boardSnapshotCache) Payload(store *state.BoardStore, width, height int6
 	c.revision, c.width, c.height = revision, width, height
 	c.raw, c.compressed = raw, output.Bytes()
 	return c.raw, c.compressed, nil
+}
+
+func compactSnapshotPayload(pixels []domain.BoardPixel, width, height int64) ([]byte, []byte, error) {
+	compact := make([]compactBoardPixel, 0, len(pixels))
+	for _, pixel := range pixels {
+		compact = append(compact, compactBoardPixel{X: pixel.X, Y: pixel.Y, C: pixel.Color, A: pixel.Author.ID, F: pixel.FrozenUntil})
+	}
+	raw, err := json.Marshal(compactBoardSnapshot{ID: "main", Width: width, Height: height, Pixels: compact})
+	if err != nil {
+		return nil, nil, err
+	}
+	var output bytes.Buffer
+	compressor, err := gzip.NewWriterLevel(&output, gzip.BestSpeed)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err = compressor.Write(raw); err != nil {
+		return nil, nil, err
+	}
+	if err = compressor.Close(); err != nil {
+		return nil, nil, err
+	}
+	return raw, output.Bytes(), nil
+}
+
+func overlaySnapshot(base, overlay []domain.BoardPixel) []domain.BoardPixel {
+	merged := make(map[[2]int]domain.BoardPixel, len(base)+len(overlay))
+	for _, pixel := range base {
+		merged[[2]int{pixel.X, pixel.Y}] = pixel
+	}
+	for _, pixel := range overlay {
+		merged[[2]int{pixel.X, pixel.Y}] = pixel
+	}
+	result := make([]domain.BoardPixel, 0, len(merged))
+	for _, pixel := range merged {
+		result = append(result, pixel)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Y == result[j].Y {
+			return result[i].X < result[j].X
+		}
+		return result[i].Y < result[j].Y
+	})
+	return result
+}
+
+func publicOnlineCount(presence *appPresence, shadows *shadowban.Store) int64 {
+	return presence.CountMatching(func(userID int64) bool {
+		return !shadows.IsBanned(strconv.FormatInt(userID, 10))
+	})
 }
 
 type publicBoardPixel struct {

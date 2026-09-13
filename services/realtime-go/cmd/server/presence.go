@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -39,6 +40,31 @@ func (p *appPresence) IsOnline(userID int64) bool {
 	p.prune(now)
 	_, ok := p.users[userID]
 	return ok
+}
+
+func (p *appPresence) Users() []int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prune(p.now())
+	result := make([]int64, 0, len(p.users))
+	for userID := range p.users {
+		result = append(result, userID)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
+func (p *appPresence) CountMatching(include func(int64) bool) int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.prune(p.now())
+	var count int64
+	for userID := range p.users {
+		if include == nil || include(userID) {
+			count++
+		}
+	}
+	return count
 }
 
 func (p *appPresence) prune(now time.Time) {

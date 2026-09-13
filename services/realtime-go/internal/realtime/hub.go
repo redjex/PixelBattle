@@ -97,9 +97,19 @@ func (c *Client) SendJSON(value any) error {
 }
 
 func (h *Hub) Broadcast(payload []byte) {
+	h.BroadcastExcept(payload, nil)
+}
+
+// BroadcastExcept sends an event to every connected user except identities in
+// excluded. It is used to keep private shadow overlays from being overwritten
+// by public events at the same coordinate.
+func (h *Hub) BroadcastExcept(payload []byte, excluded map[string]struct{}) {
 	h.mu.RLock()
 	clients := make([]*Client, 0, len(h.clients))
 	for client := range h.clients {
+		if _, skip := excluded[client.UserID]; skip {
+			continue
+		}
 		clients = append(clients, client)
 	}
 	h.mu.RUnlock()

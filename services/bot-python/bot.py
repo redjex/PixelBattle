@@ -340,6 +340,7 @@ def admin_markup() -> dict:
             [{"text": "Лимит", "callback_data": "admin:category:limit"}],
             [{"text": "Карта", "callback_data": "admin:category:map"}],
             [{"text": "Игра", "callback_data": "admin:category:game"}],
+            [{"text": "Модерация", "callback_data": "admin:category:moderation"}],
         ]
     }
 
@@ -431,6 +432,17 @@ def admin_category(chat_id: int, category: str, notice: str | None = None) -> No
             ]
         }
         send_admin_photo(chat_id, "game.png", f"Настройки игры{suffix}", markup)
+    elif category == "moderation":
+        markup = {
+            "inline_keyboard": [
+                [{"text": "Теневой бан", "callback_data": "admin:shadow:ban"}],
+                [{"text": "Снять теневой бан", "callback_data": "admin:shadow:unban"}],
+                [{"text": "Список теневых банов", "callback_data": "admin:shadow:list"}],
+                [{"text": "ID игрока по клетке", "callback_data": "admin:pixel:owner"}],
+                [back],
+            ]
+        }
+        send_admin_photo(chat_id, "game.png", f"Модерация{suffix}", markup)
 
 
 def admin_trophies(chat_id: int, notice: str | None = None) -> None:
@@ -1138,6 +1150,37 @@ def resolve_user(raw: str) -> tuple[int | None, str]:
     return (int(user_id), f"@{normalized}") if user_id else (None, f"@{normalized}")
 
 
+def set_shadow_ban(user_id: int, banned: bool) -> None:
+    response = realtime_request(
+        "POST",
+        "/api/admin/shadow-bans",
+        json={"userId": str(user_id), "banned": banned},
+    )
+    response.raise_for_status()
+
+
+def shadow_ban_labels() -> list[str]:
+    response = realtime_request("GET", "/api/admin/shadow-bans")
+    response.raise_for_status()
+    result = []
+    for user_id in response.json().get("userIds", []):
+        username = database.hget(USER_ID_KEY, str(user_id))
+        result.append(f"@{username} (ID {user_id})" if username else f"ID {user_id}")
+    return result
+
+
+def pixel_owner(raw: str) -> tuple[int, int, dict[str, Any]] | None:
+    match = re.fullmatch(r"\s*(\d+)\s*[,; ]\s*(\d+)\s*", raw)
+    if not match:
+        return None
+    x, y = int(match.group(1)), int(match.group(2))
+    response = realtime_request(
+        "GET", "/api/admin/boards/main/pixel", params={"x": x, "y": y}
+    )
+    response.raise_for_status()
+    return x, y, response.json()
+
+
 def set_board_size(text: str) -> tuple[int, int] | None:
     parts = text.lower().replace("×", "x").split("x")
     if len(parts) != 2 or not all(part.strip().isdigit() for part in parts):
@@ -1513,6 +1556,51 @@ def apply_admin_action(admin_id: int, chat_id: int, text: str) -> None:
             admin_trophies(
                 chat_id, "Не удалось обнулить трофеи. Проверь доступность сервера."
             )
+    elif action in {"shadow_ban_user", "shadow_unban_user"}:
+        user_id, label = resolve_user(text)
+        if user_id is None:
+            pending_actions[pending_key] = action
+            send_admin_prompt(
+                admin_id,
+                chat_id,
+                "Пользователь не найден. Отправь @username или Telegram ID ещё раз.",
+            )
+            return
+        banned = action == "shadow_ban_user"
+        try:
+            set_shadow_ban(user_id, banned)
+            notice = (
+                f"Для {label} включена изолированная карта."
+                if banned
+                else f"Для {label} восстановлена обычная карта."
+            )
+        except requests.RequestException:
+            notice = "Не удалось изменить режим игрока. Проверь доступность сервера."
+        admin_category(chat_id, "moderation", notice)
+    elif action == "pixel_owner":
+        try:
+            result = pixel_owner(text)
+        except requests.RequestException:
+            result = None
+        if result is None:
+            pending_actions[pending_key] = "pixel_owner"
+            send_admin_prompt(
+                admin_id,
+                chat_id,
+                "Отправь координаты клетки: x,y (например 12,34).",
+            )
+            return
+        x, y, pixel = result
+        if not pixel.get("occupied"):
+            notice = f"Клетка {x},{y} не занята игроком."
+        else:
+            target_id = str(pixel.get("userId", ""))
+            username = database.hget(USER_ID_KEY, target_id)
+            label = (
+                f"@{username} (ID {target_id})" if username else f"ID {target_id}"
+            )
+            notice = f"Клетка {x},{y}: {label}, цвет {pixel.get('color', '—')}."
+        admin_category(chat_id, "moderation", notice)
     elif isinstance(action, dict) and action.get("action") == "item_user":
         user_id, label = resolve_user(text)
         if user_id is None:
@@ -1627,6 +1715,30 @@ def handle_callback(callback: dict[str, Any]) -> None:
             "Отправь @username или Telegram ID игрока, которому нужно сбросить дневные квесты.",
         )
         return
+    if action in {"admin:shadow:ban", "admin:shadow:unban"}:
+        pending_actions[(user_id, chat_id)] = (
+            "shadow_ban_user" if action.endswith(":ban") else "shadow_unban_user"
+        )
+        send_admin_prompt(user_id, chat_id, "Отправь @username или Telegram ID игрока.")
+        return
+    if action == "admin:shadow:list":
+        try:
+            labels = shadow_ban_labels()
+            notice = (
+                "Изолированные игроки:\n" + "\n".join(labels)
+                if labels
+                else "Список пуст."
+            )
+        except (requests.RequestException, TypeError, ValueError):
+            notice = "Не удалось получить список."
+        admin_category(chat_id, "moderation", notice)
+        return
+    if action == "admin:pixel:owner":
+        pending_actions[(user_id, chat_id)] = "pixel_owner"
+        send_admin_prompt(
+            user_id, chat_id, "Отправь координаты клетки: x,y (например 12,34)."
+        )
+        return
     if action == "admin:quests:all":
         markup = {
             "inline_keyboard": [
@@ -1716,10 +1828,30 @@ def handle_callback(callback: dict[str, Any]) -> None:
             response = realtime_request("GET", "/api/admin/stats")
             response.raise_for_status()
             stats = response.json()
+            lines = []
+            for player in stats.get("players", []):
+                target_id = str(player.get("userId", ""))
+                username = str(player.get("username", "")).strip().lstrip("@")
+                display_name = str(player.get("displayName", "")).strip()
+                if username:
+                    lines.append(f"@{username} — ID {target_id}")
+                elif display_name:
+                    lines.append(f"{display_name} — ID {target_id}")
+                else:
+                    lines.append(f"ID {target_id}")
             notice = f"Сейчас онлайн: {stats['currentOnline']}\nПиковый онлайн: {stats['peakOnline']}"
         except (requests.RequestException, KeyError, ValueError):
             notice = "Не удалось получить статистику онлайна."
+            lines = []
         admin_category(chat_id, "game", notice)
+        if lines:
+            chunk = "Онлайн:\n"
+            for line in lines:
+                if len(chunk) + len(line) + 1 > 3500:
+                    send_message(chat_id, chunk.rstrip())
+                    chunk = "Онлайн (продолжение):\n"
+                chunk += line + "\n"
+            send_message(chat_id, chunk.rstrip())
         return
     if action == "admin:recording":
         admin_recording(chat_id)

@@ -50,6 +50,27 @@ def test_force_captcha_uses_protected_admin_endpoint():
     response.raise_for_status.assert_called_once()
 
 
+def test_shadow_ban_uses_protected_admin_endpoint():
+    response = Mock()
+    with patch.object(bot, "realtime_request", return_value=response) as request:
+        bot.set_shadow_ban(789, True)
+    request.assert_called_once_with(
+        "POST", "/api/admin/shadow-bans", json={"userId": "789", "banned": True}
+    )
+    response.raise_for_status.assert_called_once()
+
+
+def test_pixel_owner_lookup_uses_coordinates():
+    response = Mock()
+    response.json.return_value = {"occupied": True, "userId": "789"}
+    with patch.object(bot, "realtime_request", return_value=response) as request:
+        result = bot.pixel_owner("12,34")
+    assert result == (12, 34, {"occupied": True, "userId": "789"})
+    request.assert_called_once_with(
+        "GET", "/api/admin/boards/main/pixel", params={"x": 12, "y": 34}
+    )
+
+
 def test_captcha_status_changes_are_sent_once_to_alert_group():
     response = Mock()
     response.json.return_value = {

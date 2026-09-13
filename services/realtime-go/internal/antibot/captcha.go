@@ -31,6 +31,12 @@ const (
 	penaltyPerStrike       = 5 * time.Second
 	cleanStatusLifetime    = 24 * time.Hour
 	maxTrackedPlayers      = 10000
+	firstIdleThreshold     = time.Minute
+	secondIdleThreshold    = 5 * time.Minute
+	idleCooldownStep       = 30 * time.Second
+	idleStepInterval       = 5 * time.Minute
+	detectionCooldownStep  = 5 * time.Second
+	maxBehaviorCooldown    = 5 * time.Minute
 )
 
 const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -51,7 +57,10 @@ type ReviewStatus struct {
 
 type playerState struct {
 	lastPlacement   time.Time
+	lastAction      time.Time
 	lastSeen        time.Time
+	connections     int
+	detections      int
 	perfectStreak   int
 	recentIntervals [timingWindowSize]time.Duration
 	intervalCount   int
@@ -103,6 +112,77 @@ func NewPersistent(penalties map[string]int, increment func(string) (int, error)
 	}
 }
 
+// Connect starts a visible app session. Inactivity penalties only accrue while
+// at least one authenticated WebSocket for the player remains connected.
+func (g *Guard) Connect(identity string, now time.Time) {
+	if identity == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.sweep(now)
+	state := g.players[identity]
+	if state == nil {
+		if len(g.players) >= maxTrackedPlayers {
+			return
+		}
+		state = &playerState{}
+		g.players[identity] = state
+	}
+	if state.connections == 0 {
+		state.lastAction = now
+	}
+	state.connections++
+	state.lastSeen = now
+}
+
+func (g *Guard) Disconnect(identity string, now time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	state := g.players[identity]
+	if state == nil {
+		return
+	}
+	if state.connections > 0 {
+		state.connections--
+	}
+	state.lastSeen = now
+}
+
+// Cooldown combines the configured placement delay with inactivity tiers and
+// a five-second penalty for every automatic detection retained for 24 hours.
+func (g *Guard) Cooldown(identity string, now time.Time, base time.Duration) time.Duration {
+	if identity == "" || base <= 0 {
+		return base
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.sweep(now)
+	state := g.players[identity]
+	if state == nil {
+		return base
+	}
+	result := base
+	if state.connections > 0 && !state.lastAction.IsZero() {
+		idle := now.Sub(state.lastAction)
+		idleCooldown := time.Duration(0)
+		switch {
+		case idle >= secondIdleThreshold:
+			idleCooldown = 2*idleCooldownStep + time.Duration((idle-secondIdleThreshold)/idleStepInterval)*idleCooldownStep
+		case idle >= firstIdleThreshold:
+			idleCooldown = idleCooldownStep
+		}
+		if idleCooldown > result {
+			result = idleCooldown
+		}
+	}
+	result += time.Duration(state.detections) * detectionCooldownStep
+	if result > maxBehaviorCooldown {
+		return maxBehaviorCooldown
+	}
+	return result
+}
+
 // RecordPlacement returns true once a player has repeatedly placed immediately
 // after the cooldown. Only accepted placements should be recorded.
 func (g *Guard) RecordPlacement(identity string, now time.Time, cooldown time.Duration) bool {
@@ -143,10 +223,12 @@ func (g *Guard) RecordPlacement(identity string, now time.Time, cooldown time.Du
 		}
 	}
 	state.lastPlacement = now
+	state.lastAction = now
 	// The 15-minute grace suppresses ordinary checks, but not strong machine
 	// timing. Otherwise OCR-assisted bots can solve once and automate freely.
 	suspiciousTiming := state.perfectStreak >= perfectIntervalsNeeded || clusteredMachineTiming(state)
 	if suspiciousTiming {
+		state.detections++
 		g.require(state, now)
 	}
 	return state.required
@@ -284,6 +366,7 @@ func (g *Guard) Verify(identity, challengeID, answer string, now time.Time) bool
 	}
 	state.lastSeen = now
 	state.lastPlacement = time.Time{}
+	state.lastAction = now
 	state.perfectStreak = 0
 	state.intervalCount = 0
 	state.intervalIndex = 0
@@ -402,7 +485,7 @@ func (g *Guard) sweep(now time.Time) {
 		if state.reviewed {
 			retention = cleanStatusLifetime
 		}
-		if !state.required && now.Sub(state.lastSeen) > retention {
+		if state.connections == 0 && !state.required && now.Sub(state.lastSeen) > retention {
 			delete(g.players, identity)
 		}
 	}

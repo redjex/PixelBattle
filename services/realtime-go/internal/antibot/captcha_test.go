@@ -26,6 +26,57 @@ func TestPerfectTimingRequiresCaptcha(t *testing.T) {
 	if len(statuses) != 1 || statuses[0].Status != "suspicious" {
 		t.Fatalf("automatically challenged player was not suspicious: %#v", statuses)
 	}
+	if got := guard.Cooldown("player", now, 5*time.Second); got != 10*time.Second {
+		t.Fatalf("first detection cooldown = %s, want 10s", got)
+	}
+}
+
+func TestInactivityCooldownTiersOnlyApplyDuringConnectedSession(t *testing.T) {
+	guard := New()
+	now := time.Unix(100, 0)
+	guard.Connect("player", now)
+	for _, test := range []struct {
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{59 * time.Second, 5 * time.Second},
+		{time.Minute, 30 * time.Second},
+		{4*time.Minute + 59*time.Second, 30 * time.Second},
+		{5 * time.Minute, 60 * time.Second},
+		{10 * time.Minute, 90 * time.Second},
+		{50 * time.Minute, maxBehaviorCooldown},
+	} {
+		if got := guard.Cooldown("player", now.Add(test.elapsed), 5*time.Second); got != test.want {
+			t.Errorf("cooldown after %s = %s, want %s", test.elapsed, got, test.want)
+		}
+	}
+	guard.Disconnect("player", now.Add(51*time.Minute))
+	if got := guard.Cooldown("player", now.Add(time.Hour), 5*time.Second); got != 5*time.Second {
+		t.Fatalf("disconnected player retained inactivity penalty: %s", got)
+	}
+}
+
+func TestRepeatedAutomaticDetectionsAddFiveSeconds(t *testing.T) {
+	guard := New()
+	now := time.Unix(100, 0)
+	trigger := func(delay time.Duration) {
+		guard.RecordPlacement("player", now, delay)
+		for index := 0; index < perfectIntervalsNeeded; index++ {
+			now = now.Add(delay + 50*time.Millisecond)
+			guard.RecordPlacement("player", now, delay)
+		}
+	}
+	trigger(5 * time.Second)
+	guard.mu.Lock()
+	state := guard.players["player"]
+	state.required = false
+	state.perfectStreak = 0
+	state.lastPlacement = time.Time{}
+	guard.mu.Unlock()
+	trigger(10 * time.Second)
+	if got := guard.Cooldown("player", now, 5*time.Second); got != 15*time.Second {
+		t.Fatalf("second detection cooldown = %s, want 15s", got)
+	}
 }
 
 func TestImperfectTimingResetsStreak(t *testing.T) {
