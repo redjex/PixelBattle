@@ -126,7 +126,10 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   const [boardDimensions, setBoardDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const acceptPixel = useCallback((pixel: Pixel) => {
-    pixelsRef.current.set(`${pixel.x}:${pixel.y}`, pixel);
+    const key = `${pixel.x}:${pixel.y}`;
+    const current = pixelsRef.current.get(key);
+    if (current?.version !== undefined && pixel.version !== undefined && current.version > pixel.version) return;
+    pixelsRef.current.set(key, pixel);
     const boardLayer = boardLayerRef.current;
     const boardSize = boardSizeRef.current;
     if (boardLayer && boardLayer.width === boardSize.width && boardLayer.height === boardSize.height && !boardLayerDirtyRef.current) {
@@ -146,6 +149,27 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   }, [onInspectPixel]);
   const reloadBoard = useCallback(() => setBoardReloadNonce((value) => value + 1), []);
   const { place } = usePixelSocket(acceptPixel, reloadBoard);
+
+  useEffect(() => {
+    const applyPixels = (event: Event) => {
+      const pixels = (event as CustomEvent<{ pixels?: Pixel[] }>).detail?.pixels;
+      if (Array.isArray(pixels)) pixels.forEach(acceptPixel);
+    };
+    window.addEventListener('pixelbattle:pixels-applied', applyPixels);
+    return () => window.removeEventListener('pixelbattle:pixels-applied', applyPixels);
+  }, [acceptPixel]);
+
+  useEffect(() => {
+    const reconcile = () => {
+      if (document.visibilityState === 'visible') reloadBoard();
+    };
+    window.addEventListener('online', reconcile);
+    document.addEventListener('visibilitychange', reconcile);
+    return () => {
+      window.removeEventListener('online', reconcile);
+      document.removeEventListener('visibilitychange', reconcile);
+    };
+  }, [reloadBoard]);
 
   useEffect(() => {
     const moveIcon = new Image();

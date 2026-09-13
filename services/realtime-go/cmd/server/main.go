@@ -795,29 +795,36 @@ func main() {
 			return
 		}
 		shadowed := shadowStore.IsBanned(identity)
+		appliedEvents := make([]publicPixelEvent, 0, len(events))
 		for index, event := range events {
 			if shadowed {
 				if err := shadowStore.Apply(r.Context(), identity, event); err != nil {
 					if index == 0 {
 						_ = writer.RefundBomb(r.Context(), identity)
+						http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
+						return
 					}
-					http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
-					return
+					break
 				}
-				payload, _ := json.Marshal(eventForClient(event))
+				publicEvent := eventForClient(event)
+				appliedEvents = append(appliedEvents, publicEvent)
+				payload, _ := json.Marshal(publicEvent)
 				hub.SendToUser(identity, payload)
 				continue
 			}
 			if err := eventQueue.Append(r.Context(), event); err != nil {
 				if index == 0 {
 					_ = writer.RefundBomb(r.Context(), identity)
+					http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
+					return
 				}
-				http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
-				return
+				break
 			}
 			boardStore.Apply(event)
 			recorder.Record(event)
-			payload, _ := json.Marshal(eventForClient(event))
+			publicEvent := eventForClient(event)
+			appliedEvents = append(appliedEvents, publicEvent)
+			payload, _ := json.Marshal(publicEvent)
 			hub.BroadcastExcept(payload, shadowStore.UsersWithPixel(event.X, event.Y))
 		}
 		captchaGuard.RecordPlacement(identity, now, userCooldown)
@@ -825,7 +832,7 @@ func main() {
 			awardDueTrophy(r.Context(), identity, author)
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, map[string]any{"placed": len(events), "inventory": inventory, "cooldownMs": appliedCooldown.Milliseconds()})
+		writeJSON(w, map[string]any{"placed": len(appliedEvents), "pixels": appliedEvents, "inventory": inventory, "cooldownMs": appliedCooldown.Milliseconds()})
 	})
 	statsHandler := func(w http.ResponseWriter, r *http.Request) {
 		telegramUser, err := telegramUserFromRequest(r)
@@ -2037,6 +2044,7 @@ type compactBoardPixel struct {
 	X int        `json:"x"`
 	Y int        `json:"y"`
 	C string     `json:"c"`
+	V int64      `json:"v"`
 	A string     `json:"a,omitempty"`
 	F *time.Time `json:"f,omitempty"`
 }
@@ -2079,7 +2087,7 @@ func (c *boardSnapshotCache) Payload(store *state.BoardStore, width, height int6
 	}
 	compact := make([]compactBoardPixel, 0, len(pixels))
 	for _, pixel := range pixels {
-		compact = append(compact, compactBoardPixel{X: pixel.X, Y: pixel.Y, C: pixel.Color, A: pixel.Author.ID, F: pixel.FrozenUntil})
+		compact = append(compact, compactBoardPixel{X: pixel.X, Y: pixel.Y, C: pixel.Color, V: pixel.Version, A: pixel.Author.ID, F: pixel.FrozenUntil})
 	}
 	raw, err := json.Marshal(compactBoardSnapshot{ID: "main", Width: width, Height: height, Pixels: compact})
 	if err != nil {
@@ -2104,7 +2112,7 @@ func (c *boardSnapshotCache) Payload(store *state.BoardStore, width, height int6
 func compactSnapshotPayload(pixels []domain.BoardPixel, width, height int64) ([]byte, []byte, error) {
 	compact := make([]compactBoardPixel, 0, len(pixels))
 	for _, pixel := range pixels {
-		compact = append(compact, compactBoardPixel{X: pixel.X, Y: pixel.Y, C: pixel.Color, A: pixel.Author.ID, F: pixel.FrozenUntil})
+		compact = append(compact, compactBoardPixel{X: pixel.X, Y: pixel.Y, C: pixel.Color, V: pixel.Version, A: pixel.Author.ID, F: pixel.FrozenUntil})
 	}
 	raw, err := json.Marshal(compactBoardSnapshot{ID: "main", Width: width, Height: height, Pixels: compact})
 	if err != nil {

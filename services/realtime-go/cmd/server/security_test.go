@@ -335,6 +335,17 @@ func TestPublicBoardDoesNotLeakProfileOrEventMetadata(t *testing.T) {
 			t.Fatal("public profile lookup ID missing")
 		}
 	}
+	if !strings.Contains(string(raw), `"v":1`) {
+		t.Fatalf("compact snapshot lost pixel version: %s", raw)
+	}
+}
+
+func TestPlacementRateLimitsDoNotExhaustSessionRequests(t *testing.T) {
+	paintSuffix, paintIP, paintUser := requestRateLimits("/api/boards/main/pixels")
+	sessionSuffix, sessionIP, sessionUser := requestRateLimits("/api/boards/session")
+	if paintSuffix == sessionSuffix || paintIP <= sessionIP || paintUser <= sessionUser {
+		t.Fatalf("placement limits are not isolated: paint=%q/%d/%d session=%q/%d/%d", paintSuffix, paintIP, paintUser, sessionSuffix, sessionIP, sessionUser)
+	}
 }
 
 func TestTrophyAwardEventOnlyExposesNicknameAndText(t *testing.T) {

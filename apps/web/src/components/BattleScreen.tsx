@@ -86,6 +86,7 @@ export function BattleScreen({ online }: { online: number | null }) {
   const [selectedPixel, setSelectedPixel] = useState<{ x: number; y: number } | null>(null);
   const [paintNonce, setPaintNonce] = useState(0);
   const [cooldownUntil, setCooldownUntil] = useState(0);
+  const rateLimitedUntilRef = useRef(0);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [inspectedPixel, setInspectedPixel] = useState<Pixel | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -200,6 +201,16 @@ export function BattleScreen({ online }: { online: number | null }) {
   }, [cooldownUntil]);
 
   useEffect(() => {
+    const handleRateLimit = (event: Event) => {
+      const retryAfterMs = Math.max(1000, Number((event as CustomEvent<{ retryAfterMs?: number }>).detail?.retryAfterMs) || 1000);
+      rateLimitedUntilRef.current = Date.now() + retryAfterMs;
+      setCooldownUntil((current) => Math.max(current, rateLimitedUntilRef.current));
+    };
+    window.addEventListener('pixelbattle:rate-limited', handleRateLimit);
+    return () => window.removeEventListener('pixelbattle:rate-limited', handleRateLimit);
+  }, []);
+
+  useEffect(() => {
     const frozenUntil = inspectedPixel?.frozenUntil ? Date.parse(inspectedPixel.frozenUntil) : 0;
     if (!frozenUntil || frozenUntil <= Date.now()) return;
     const timer = window.setInterval(() => setClock(Date.now()), 250);
@@ -219,7 +230,7 @@ export function BattleScreen({ online }: { online: number | null }) {
           setPlacementCooldownMs(nextCooldown);
           setPaused(Boolean(result.paused));
           if (result.inventory) setInventory(result.inventory);
-          if (!nextCooldown) { setCooldownUntil(0); setCooldownSeconds(0); }
+          if (!nextCooldown && Date.now() >= rateLimitedUntilRef.current) { setCooldownUntil(0); setCooldownSeconds(0); }
         }
       })
       .catch(() => undefined);
@@ -328,12 +339,16 @@ export function BattleScreen({ online }: { online: number | null }) {
       });
       if (response.status === 429) {
         const retryAfter = Math.max(1, Number(response.headers.get('Retry-After')) || Math.ceil(placementCooldownMs / 1000));
-        setCooldownUntil(Date.now() + retryAfter * 1000);
+        rateLimitedUntilRef.current = Date.now() + retryAfter * 1000;
+        setCooldownUntil(rateLimitedUntilRef.current);
         return;
       }
-      const result = await response.json() as { inventory?: Inventory; cooldownMs?: number };
+      const result = await response.json() as { inventory?: Inventory; cooldownMs?: number; pixels?: Pixel[] };
       if (result.inventory) setInventory(result.inventory);
       if (response.ok) {
+        if (result.pixels?.length) {
+          window.dispatchEvent(new CustomEvent('pixelbattle:pixels-applied', { detail: { pixels: result.pixels } }));
+        }
         setItemMode(null);
         const cooldownMs = Math.max(0, result.cooldownMs ?? placementCooldownMs);
         if (cooldownMs > 0) setCooldownUntil(Date.now() + cooldownMs);

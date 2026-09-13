@@ -1,7 +1,7 @@
 import type { Pixel } from './types/pixel';
 
 export type BoardSnapshot = { width: number; height: number; pixels: Pixel[] };
-type CompactSnapshot = { width: number; height: number; pixels: Array<{ x: number; y: number; c: string; a?: string; f?: string }> };
+type CompactSnapshot = { width: number; height: number; pixels: Array<{ x: number; y: number; c: string; v?: number; a?: string; f?: string }> };
 
 let cachedPromise: Promise<BoardSnapshot> | null = null;
 let cachedAt = 0;
@@ -28,6 +28,7 @@ async function requestSnapshot(initData: string): Promise<BoardSnapshot> {
           x: pixel.x,
           y: pixel.y,
           color: pixel.c,
+          version: pixel.v,
           author: pixel.a ? { id: pixel.a } : undefined,
           frozenUntil: pixel.f,
         })),

@@ -22,6 +22,13 @@ function dispatchCaptchaRequired() {
   window.dispatchEvent(new Event('pixelbattle:captcha-required'));
 }
 
+function dispatchRateLimited(response: Response) {
+  const retryAfterSeconds = Math.max(1, Number(response.headers.get('Retry-After')) || 1);
+  window.dispatchEvent(new CustomEvent('pixelbattle:rate-limited', {
+    detail: { retryAfterMs: retryAfterSeconds * 1000 },
+  }));
+}
+
 export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: () => void) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<number | null>(null);
@@ -30,6 +37,7 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
 
   useEffect(() => {
     let disposed = false;
+    let openedOnce = false;
     const telegram = window.Telegram?.WebApp;
     if (!telegram?.initData) return;
     const initData = telegram.initData;
@@ -45,6 +53,8 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
       socket.onopen = () => {
         socket.send(JSON.stringify({ type: 'authenticate', initData }));
         setConnected(true);
+        if (openedOnce) onBoardReload();
+        openedOnce = true;
       };
       socket.onmessage = (event) => {
         try {
@@ -119,6 +129,7 @@ export function usePixelSocket(onPixel: (pixel: Pixel) => void, onBoardReload: (
       keepalive: true,
     }).then(async (response) => {
       if (!response.ok) {
+        if (response.status === 429) dispatchRateLimited(response);
         const failure = await response.json().catch(() => null) as { captchaRequired?: boolean; code?: string } | null;
         if (failure?.captchaRequired || failure?.code === 'captcha_required') dispatchCaptchaRequired();
         return null;

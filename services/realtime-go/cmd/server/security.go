@@ -206,11 +206,23 @@ func maintenanceAllows(path string, userID int64, policy appAccessPolicy) bool {
 	return !policy.IsTestMode() || policy.IsAdmin(userID) || path == "/api/boards/session"
 }
 
+func requestRateLimits(path string) (suffix string, ipLimit, userLimit int) {
+	switch path {
+	case "/api/boards/main/pixels":
+		return ":paint", 3600, 3000
+	case "/api/boards/items/bomb/use":
+		return ":bomb", 300, 120
+	default:
+		return "", 600, 240
+	}
+}
+
 func secureHandler(next http.Handler, adminToken string, limits *rateLimiter, policy appAccessPolicy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if !limits.allow("ip:"+peerIP(r), 600, time.Now()) {
+		rateSuffix, ipLimit, userLimit := requestRateLimits(r.URL.Path)
+		if !limits.allow("ip:"+peerIP(r)+rateSuffix, ipLimit, time.Now()) {
 			w.Header().Set("Retry-After", "60")
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
@@ -237,7 +249,7 @@ func secureHandler(next http.Handler, adminToken string, limits *rateLimiter, po
 				http.Error(w, "Telegram Mini App authentication required", http.StatusUnauthorized)
 				return
 			}
-			if !limits.allow("user:"+strconv.FormatInt(user.ID, 10), 240, time.Now()) {
+			if !limits.allow("user:"+strconv.FormatInt(user.ID, 10)+rateSuffix, userLimit, time.Now()) {
 				w.Header().Set("Retry-After", "60")
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
