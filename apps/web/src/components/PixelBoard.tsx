@@ -99,7 +99,6 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
   const templateWatchPointerRef = useRef<number | null>(null);
   const templateHoldToShowRef = useRef(false);
   const templatePointerRevealRef = useRef(false);
-  const templateSpaceRevealRef = useRef(false);
   const lastTemplateWatchTapRef = useRef(0);
   const boardSizeRef = useRef({ width: DEFAULT_BOARD_SIZE, height: DEFAULT_BOARD_SIZE });
   const panRef = useRef({ x: 0, y: 0 });
@@ -237,7 +236,6 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     templateWatchPointerRef.current = null;
     templateHoldToShowRef.current = false;
     templatePointerRevealRef.current = false;
-    templateSpaceRevealRef.current = false;
     lastTemplateWatchTapRef.current = 0;
     setRevision((value) => value + 1);
     if (!templateImageUrl || !boardDimensions) return;
@@ -412,7 +410,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
         const templateVisibleWidth = templateVisibleRight - templateVisibleLeft;
         const templateVisibleHeight = templateVisibleBottom - templateVisibleTop;
         const templateVisible = templateHoldToShowRef.current
-          ? templatePointerRevealRef.current || templateSpaceRevealRef.current
+          ? templatePointerRevealRef.current
           : templateWatchPointerRef.current === null;
         if (templateVisibleWidth > 0 && templateVisibleHeight > 0 && templateVisible) {
           context.save();
@@ -522,6 +520,20 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     });
   }
 
+  function toggleTemplateVisibility() {
+    if (eyedropper || !templateRef.current) return;
+    templateHoldToShowRef.current = !templateHoldToShowRef.current;
+    templatePointerRevealRef.current = false;
+    templateWatchPointerRef.current = null;
+    lastTemplateWatchTapRef.current = 0;
+    setRevision((value) => value + 1);
+  }
+
+  function handleTemplateContextMenu(event: React.MouseEvent<HTMLCanvasElement>) {
+    event.preventDefault();
+    toggleTemplateVisibility();
+  }
+
   function getTemplateHandles(canvas: HTMLCanvasElement) {
     const template = templateRef.current;
     if (!template) return null;
@@ -544,6 +556,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
 
   function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!boardReadyRef.current) return;
+    if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     if (!eyedropper && templateRef.current) {
       const handles = getTemplateHandles(event.currentTarget);
@@ -726,7 +739,6 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
         const previousTap = lastTemplateWatchTapRef.current;
         if (previousTap > 0 && event.timeStamp - previousTap <= 450) {
           templateHoldToShowRef.current = !templateHoldToShowRef.current;
-          templateSpaceRevealRef.current = false;
           lastTemplateWatchTapRef.current = 0;
           navigator.vibrate?.(25);
         } else {
@@ -845,33 +857,16 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     const handleTemplateSpace = (event: KeyboardEvent) => {
       const isSpace = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
       if (!isSpace || event.altKey || event.ctrlKey || event.metaKey) return;
-      if (event.type === 'keyup') {
-        if (!templateSpaceRevealRef.current) return;
-        event.preventDefault();
-        templateSpaceRevealRef.current = false;
-        scheduleViewRender();
-        return;
-      }
       const target = event.target;
-      if (target instanceof HTMLElement && target.closest('input, textarea, select, button, [contenteditable="true"]')) return;
-      if (!templateRef.current || !templateHoldToShowRef.current) return;
+      if (target instanceof HTMLElement && target.closest('input:not([type="button"]):not([type="submit"]):not([type="reset"]), textarea, select, [contenteditable="true"]')) return;
+      if (!templateRef.current) return;
       event.preventDefault();
-      if (templateSpaceRevealRef.current) return;
-      templateSpaceRevealRef.current = true;
-      scheduleViewRender();
-    };
-    const hideAfterBlur = () => {
-      if (!templateSpaceRevealRef.current) return;
-      templateSpaceRevealRef.current = false;
-      scheduleViewRender();
+      if (event.repeat) return;
+      toggleTemplateVisibility();
     };
     window.addEventListener('keydown', handleTemplateSpace, true);
-    window.addEventListener('keyup', handleTemplateSpace, true);
-    window.addEventListener('blur', hideAfterBlur);
     return () => {
       window.removeEventListener('keydown', handleTemplateSpace, true);
-      window.removeEventListener('keyup', handleTemplateSpace, true);
-      window.removeEventListener('blur', hideAfterBlur);
     };
   }, []);
 
@@ -905,7 +900,7 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
 
   return (
     <div className="board-wrap">
-      <canvas ref={canvasRef} className={`pixel-board${eyedropper ? ' eyedropper-mode' : ''}`} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={(event) => event.preventDefault()} onWheel={handleWheel} />
+      <canvas ref={canvasRef} className={`pixel-board${eyedropper ? ' eyedropper-mode' : ''}`} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onContextMenu={handleTemplateContextMenu} onWheel={handleWheel} />
     </div>
   );
 }
