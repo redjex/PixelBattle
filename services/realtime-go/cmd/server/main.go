@@ -274,9 +274,6 @@ func main() {
 			}
 		}
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
-		if userCooldown > 0 {
-			userCooldown += captchaGuard.Penalty(strconv.FormatInt(telegramUser.ID, 10), time.Now().UTC())
-		}
 		inventory := persistence.Inventory{}
 		prizes := json.RawMessage("[]")
 		soldOutTrophies := []string{}
@@ -597,9 +594,6 @@ func main() {
 			return
 		}
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
-		if userCooldown > 0 {
-			userCooldown += captchaGuard.Penalty(identity, now)
-		}
 		appliedCooldown := userCooldown
 		if userCooldown > 0 {
 			allowed, retryAfter, effectiveCooldown := cooldown.Allow(identity, request.BoardID, userCooldown, now)
@@ -694,9 +688,6 @@ func main() {
 		}
 		now := time.Now().UTC()
 		userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
-		if userCooldown > 0 {
-			userCooldown += captchaGuard.Penalty(identity, now)
-		}
 		appliedCooldown := userCooldown
 		if userCooldown > 0 {
 			allowed, retryAfter, effectiveCooldown := cooldown.Allow(identity, "main", userCooldown, now)
@@ -1639,9 +1630,6 @@ func main() {
 					return
 				}
 				userCooldown := accessStore.CooldownFor(telegramUser.ID, placementCooldown)
-				if userCooldown > 0 {
-					userCooldown += captchaGuard.Penalty(identity, now)
-				}
 				appliedCooldown := userCooldown
 				if userCooldown > 0 {
 					allowed, retryAfter, effectiveCooldown := cooldown.Allow(identity, request.BoardID, userCooldown, now)
