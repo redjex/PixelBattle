@@ -19,7 +19,7 @@ const localPalettePreview = import.meta.env.DEV
 function getSavedColor() {
   try {
     const saved = window.localStorage.getItem(SELECTED_COLOR_STORAGE_KEY)?.toUpperCase();
-    if (saved && /^#[0-9A-F]{6}(?:[0-9A-F]{2})?$/.test(saved)) return saved;
+    if (saved && /^#[0-9A-F]{6}(?:[0-9A-F]{2})?$/.test(saved)) return saved.slice(0, 7);
   } catch {
     // Storage can be unavailable in restricted WebViews.
   }
@@ -53,16 +53,6 @@ function hexToHue(hex: string) {
   return Math.round((hue * 60 + 360) % 360);
 }
 
-function hexAlpha(hex: string) {
-  return hex.length === 9 ? Number.parseInt(hex.slice(7, 9), 16) : 255;
-}
-
-function withAlpha(hex: string, alpha: number) {
-  const opaque = hex.slice(0, 7).toUpperCase();
-  if (alpha >= 255) return opaque;
-  return `${opaque}${Math.round(alpha).toString(16).padStart(2, '0')}`.toUpperCase();
-}
-
 function hexToPigment(hex: string) {
   const channels = [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
   const maximum = Math.max(...channels);
@@ -82,6 +72,26 @@ function pigmentToHex(hue: number, pigment: number) {
     ? 255 + (channel - 255) * strength
     : channel * strength));
   return `#${mixed.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+}
+
+async function writeClipboardText(value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    const input = document.createElement('textarea');
+    input.value = value;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    document.body.appendChild(input);
+    input.select();
+    try {
+      return document.execCommand('copy');
+    } finally {
+      input.remove();
+    }
+  }
 }
 
 type PixelAuthor = NonNullable<Pixel['author']>;
@@ -143,6 +153,7 @@ export function BattleScreen({ online }: { online: number | null }) {
   const zoomRef = useRef(10);
   const zoomAnimationRef = useRef<number | null>(null);
   const [color, setColor] = useState<string>(getSavedColor);
+  const [hexInput, setHexInput] = useState(color);
   const [selectedPixel, setSelectedPixel] = useState<{ x: number; y: number } | null>(null);
   const [paintNonce, setPaintNonce] = useState(0);
   const [cooldownUntil, setCooldownUntil] = useState(0);
@@ -152,6 +163,7 @@ export function BattleScreen({ online }: { online: number | null }) {
   const [paletteOpen, setPaletteOpen] = useState(localPalettePreview);
   const [infoOpen, setInfoOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [hexCopied, setHexCopied] = useState(false);
   const [templateImageUrl, setTemplateImageUrl] = useState<string | null>(null);
   const [templatePlacement, setTemplatePlacement] = useState<TemplatePlacement | null>(null);
   const [inventory, setInventory] = useState<Inventory>(EMPTY_INVENTORY);
@@ -173,6 +185,8 @@ export function BattleScreen({ online }: { online: number | null }) {
       // Keep the selected color for the current session if storage is unavailable.
     }
   }, [color]);
+
+  useEffect(() => setHexInput(color), [color]);
 
   const inspectPixel = useCallback((pixel: Pixel | null) => {
     const pixelAuthor = pixel?.author;
@@ -348,10 +362,23 @@ export function BattleScreen({ online }: { online: number | null }) {
   }, [inspectedPixel?.author?.id, inspectedPixel?.author?.displayName]);
 
   const copyCoordinates = async () => {
-    if (!selectedPixel) return;
-    await navigator.clipboard.writeText(`${selectedPixel.x},${selectedPixel.y}`);
+    const coordinates = selectedPixel ?? (localPalettePreview ? { x: 0, y: 0 } : null);
+    if (!coordinates || !await writeClipboardText(`${coordinates.x},${coordinates.y}`)) return;
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
+  };
+
+  const copyHex = async () => {
+    if (!await writeClipboardText(color.toUpperCase())) return;
+    setHexCopied(true);
+    window.setTimeout(() => setHexCopied(false), 1200);
+  };
+
+  const updateHexInput = (value: string) => {
+    const nextValue = value.trim().toUpperCase();
+    setHexInput(nextValue);
+    const match = nextValue.match(/^#?([0-9A-F]{6})$/);
+    if (match) setColor(`#${match[1]}`);
   };
 
   const author = inspectedPixel?.author;
@@ -536,8 +563,8 @@ export function BattleScreen({ online }: { online: number | null }) {
           </div>
         <div className={`placement-frame${paletteOpen ? ' open' : ''}`}>
           <button className="selected-color" style={{ '--selected-color': color } as CSSProperties} onClick={() => setPaletteOpen((open) => !open)} aria-label="Открыть палитру" aria-expanded={paletteOpen} />
-          <span className="selected-color-hex">{color.toUpperCase()}</span>
-          <button className={`coordinate-copy${copied ? ' copied' : ''}${contrastClass}`} onClick={copyCoordinates} disabled={!selectedPixel} aria-label="Скопировать координаты">
+          <button className={`selected-color-hex${hexCopied ? ' copied' : ''}`} onClick={() => void copyHex()} aria-label={`Скопировать HEX ${color.toUpperCase()}`}>{color.toUpperCase()}</button>
+          <button className={`coordinate-copy${copied ? ' copied' : ''}${contrastClass}`} onClick={() => void copyCoordinates()} disabled={!selectedPixel && !localPalettePreview} aria-label="Скопировать координаты">
             <CasinoCoordinates x={selectedPixel?.x ?? 0} y={selectedPixel?.y ?? 0} />
           </button>
           <div className="placement-palette" aria-label="Палитра цветов" aria-hidden={!paletteOpen}>
@@ -558,9 +585,9 @@ export function BattleScreen({ online }: { online: number | null }) {
               min="0"
               max="359"
               value={hexToHue(color)}
-              onChange={(event) => setColor(withAlpha(
-                pigmentToHex(Number(event.currentTarget.value), hexToPigment(color)),
-                hexAlpha(color),
+              onChange={(event) => setColor(pigmentToHex(
+                Number(event.currentTarget.value),
+                hexToPigment(color),
               ))}
               aria-label="Выбрать цвет на спектре"
               tabIndex={paletteOpen ? 0 : -1}
@@ -572,24 +599,29 @@ export function BattleScreen({ online }: { online: number | null }) {
               min="0"
               max="100"
               value={hexToPigment(color)}
-              onChange={(event) => setColor(withAlpha(
-                pigmentToHex(hexToHue(color), Number(event.currentTarget.value)),
-                hexAlpha(color),
+              onChange={(event) => setColor(pigmentToHex(
+                hexToHue(color),
+                Number(event.currentTarget.value),
               ))}
               aria-label="Добавить белый или чёрный пигмент"
               tabIndex={paletteOpen ? 0 : -1}
-              style={{ '--hue-color': hueToHex(hexToHue(color)), '--slider-color': color.slice(0, 7) } as CSSProperties}
+              style={{ '--hue-color': hueToHex(hexToHue(color)), '--slider-color': color } as CSSProperties}
             />
             <input
-              className="color-opacity color-slider"
-              type="range"
-              min="0"
-              max="255"
-              value={hexAlpha(color)}
-              onChange={(event) => setColor(withAlpha(color, Number(event.currentTarget.value)))}
-              aria-label="Настроить прозрачность цвета"
+              className="color-hex-input"
+              type="text"
+              value={hexInput}
+              maxLength={7}
+              placeholder="#RRGGBB"
+              onChange={(event) => updateHexInput(event.currentTarget.value)}
+              onBlur={() => setHexInput(color)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+              aria-label="Введите HEX-код цвета"
+              autoComplete="off"
+              spellCheck={false}
               tabIndex={paletteOpen ? 0 : -1}
-              style={{ '--opaque-color': color.slice(0, 7), '--slider-color': color } as CSSProperties}
             />
           </div>
         </div>

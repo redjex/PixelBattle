@@ -343,13 +343,15 @@ button { color: inherit; }
 .pixel-item-button.selected { color:#fff; background:#000; }
 .pixel-item-button:disabled { cursor:default; opacity:1; }
 .placement-frame { position:relative; z-index:2; order:2; box-sizing:border-box; width:88%; height:42px; min-height:42px; margin:0 auto -6px; padding:3px; overflow:hidden; border:3px solid #fff; border-radius:6px; display:grid; grid-template-columns:34px 92px minmax(0,1fr); grid-template-rows:36px 1fr; align-items:center; gap:0; background:#fff; box-shadow:0 0 0 3px #000; transform:translateY(15px); transition:width .32s cubic-bezier(.22,1,.36,1),height .32s cubic-bezier(.22,1,.36,1),box-shadow .2s ease; }
-.placement-frame.open { width:calc(100% - 26px); height:204px; border-radius:6px 6px 0 0; box-shadow:0 0 0 4px #000; }
+.placement-frame.open { width:calc(100% - 26px); height:220px; border-radius:6px 6px 0 0; box-shadow:0 0 0 4px #000; }
 .placement-dock .placement-frame + .paint-action.visible { transform:translateY(15px); }
 .placement-dock .placement-frame + .paint-action:active:not(:disabled) { transform:translateY(18px); }
 .selected-color { --selected-color:#000; position:relative; width:22px; height:22px; margin:auto 0 auto 1px; padding:0; overflow:hidden; border:2px solid #000; border-radius:4px; box-shadow:none; cursor:pointer; image-rendering:pixelated; transform:translateY(-7px); transition:transform .12s steps(2,end); background-color:#fff; background-image:conic-gradient(#bbb 25%,#fff 0 50%,#bbb 0 75%,#fff 0); background-size:8px 8px; }
 .selected-color::after { content:""; position:absolute; inset:0; background:var(--selected-color); }
 .selected-color:active { transform:translateY(-5px); }
-.selected-color-hex { min-width:0; overflow:hidden; color:#000; font-family:"Minecraft Rus",monospace; font-size:12px; line-height:1; white-space:nowrap; transform:translateY(-7px); }
+.selected-color-hex { min-width:0; height:36px; padding:0; overflow:hidden; border:0; display:flex; align-items:center; color:#000; background:transparent; box-shadow:none; cursor:pointer; font-family:"Minecraft Rus",monospace; font-size:12px; line-height:1; white-space:nowrap; transform:translateY(-7px); }
+.selected-color-hex:active { transform:translateY(-5px); }
+.selected-color-hex.copied { color:var(--accent); }
 .coordinate-copy { min-width:0; height:36px; padding:0 1px 0 4px; border:0; display:flex; align-items:center; justify-content:flex-end; color:#000; background:transparent; cursor:pointer; font-family:"Minecraft Rus",monospace; font-size:14px; font-weight:400; font-variant-numeric:tabular-nums; transform:translateY(-7px); }
 .coordinate-copy:active:not(:disabled) { transform:translateY(-5px); }
 .coordinate-copy img { width:17px; height:17px; opacity:.68; }
@@ -369,7 +371,8 @@ button { color: inherit; }
 .color-spectrum { margin-top:6px; background:linear-gradient(90deg,#f00 0%,#ff0 16.67%,#0f0 33.33%,#0ff 50%,#00f 66.67%,#f0f 83.33%,#f00 100%); }
 .color-slider { margin-top:6px; }
 .color-pigment { background:linear-gradient(90deg,#fff 0%,var(--hue-color) 50%,#000 100%); }
-.color-opacity { background-color:#fff; background-image:linear-gradient(90deg,transparent,var(--opaque-color)),conic-gradient(#bbb 25%,#fff 0 50%,#bbb 0 75%,#fff 0); background-size:100% 100%,8px 8px; }
+.color-hex-input { grid-column:1 / -1; box-sizing:border-box; width:100%; height:28px; margin-top:6px; padding:2px 7px 0; border:2px solid #000; border-radius:4px; color:#000; background:#fff; outline:none; font-family:"Minecraft Rus",monospace; font-size:13px; line-height:1; text-transform:uppercase; }
+.color-hex-input:focus { box-shadow:0 0 0 2px #fff,0 0 0 4px #000; }
 .color-spectrum::-webkit-slider-runnable-track,.color-slider::-webkit-slider-runnable-track { height:100%; background:transparent; }
 .color-spectrum::-webkit-slider-thumb,.color-slider::-webkit-slider-thumb { box-sizing:border-box; width:9px; height:18px; margin-top:-4px; appearance:none; -webkit-appearance:none; border:2px solid #fff; border-radius:2px; background:var(--slider-color); box-shadow:0 0 0 2px #000; }
 .color-spectrum::-moz-range-track,.color-slider::-moz-range-track { height:100%; background:transparent; }
