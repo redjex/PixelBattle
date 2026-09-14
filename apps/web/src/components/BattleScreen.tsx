@@ -13,15 +13,75 @@ const COLORS = [
 ] as const;
 const SELECTED_COLOR_STORAGE_KEY = 'pixelbattle:selected-color';
 const DEFAULT_COLOR = '#009DFF';
+const localPalettePreview = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).get('preview') === 'palette';
 
 function getSavedColor() {
   try {
     const saved = window.localStorage.getItem(SELECTED_COLOR_STORAGE_KEY)?.toUpperCase();
-    if (saved && COLORS.includes(saved as typeof COLORS[number])) return saved;
+    if (saved && /^#[0-9A-F]{6}(?:[0-9A-F]{2})?$/.test(saved)) return saved;
   } catch {
     // Storage can be unavailable in restricted WebViews.
   }
   return DEFAULT_COLOR;
+}
+
+function hueToHex(hue: number) {
+  const sector = Math.floor(hue / 60) % 6;
+  const blend = Math.round(255 * (1 - Math.abs((hue / 60) % 2 - 1)));
+  const channels = [
+    [255, blend, 0], [blend, 255, 0], [0, 255, blend],
+    [0, blend, 255], [blend, 0, 255], [255, 0, blend],
+  ][sector];
+  return `#${channels
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('')}`.toUpperCase();
+}
+
+function hexToHue(hex: string) {
+  const red = Number.parseInt(hex.slice(1, 3), 16) / 255;
+  const green = Number.parseInt(hex.slice(3, 5), 16) / 255;
+  const blue = Number.parseInt(hex.slice(5, 7), 16) / 255;
+  const maximum = Math.max(red, green, blue);
+  const difference = maximum - Math.min(red, green, blue);
+  if (difference === 0) return 0;
+  const hue = maximum === red
+    ? ((green - blue) / difference) % 6
+    : maximum === green
+      ? (blue - red) / difference + 2
+      : (red - green) / difference + 4;
+  return Math.round((hue * 60 + 360) % 360);
+}
+
+function hexAlpha(hex: string) {
+  return hex.length === 9 ? Number.parseInt(hex.slice(7, 9), 16) : 255;
+}
+
+function withAlpha(hex: string, alpha: number) {
+  const opaque = hex.slice(0, 7).toUpperCase();
+  if (alpha >= 255) return opaque;
+  return `${opaque}${Math.round(alpha).toString(16).padStart(2, '0')}`.toUpperCase();
+}
+
+function hexToPigment(hex: string) {
+  const channels = [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
+  const maximum = Math.max(...channels);
+  const minimum = Math.min(...channels);
+  if (maximum === 0) return 100;
+  if (minimum === 255) return 0;
+  return maximum === 255
+    ? Math.round(50 * (1 - minimum / 255))
+    : Math.round(50 + 50 * (1 - maximum / 255));
+}
+
+function pigmentToHex(hue: number, pigment: number) {
+  const base = hueToHex(hue);
+  const channels = [1, 3, 5].map((index) => Number.parseInt(base.slice(index, index + 2), 16));
+  const strength = pigment <= 50 ? pigment / 50 : (100 - pigment) / 50;
+  const mixed = channels.map((channel) => Math.round(pigment <= 50
+    ? 255 + (channel - 255) * strength
+    : channel * strength));
+  return `#${mixed.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }
 
 type PixelAuthor = NonNullable<Pixel['author']>;
@@ -89,7 +149,7 @@ export function BattleScreen({ online }: { online: number | null }) {
   const rateLimitedUntilRef = useRef(0);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [inspectedPixel, setInspectedPixel] = useState<Pixel | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(localPalettePreview);
   const [infoOpen, setInfoOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [templateImageUrl, setTemplateImageUrl] = useState<string | null>(null);
@@ -475,11 +535,11 @@ export function BattleScreen({ online }: { online: number | null }) {
             </button>
           </div>
         <div className={`placement-frame${paletteOpen ? ' open' : ''}`}>
-          <button className="selected-color" style={{ backgroundColor: color }} onClick={() => setPaletteOpen((open) => !open)} aria-label="Открыть палитру" aria-expanded={paletteOpen} />
+          <button className="selected-color" style={{ '--selected-color': color } as CSSProperties} onClick={() => setPaletteOpen((open) => !open)} aria-label="Открыть палитру" aria-expanded={paletteOpen} />
+          <span className="selected-color-hex">{color.toUpperCase()}</span>
           <button className={`coordinate-copy${copied ? ' copied' : ''}${contrastClass}`} onClick={copyCoordinates} disabled={!selectedPixel} aria-label="Скопировать координаты">
             <CasinoCoordinates x={selectedPixel?.x ?? 0} y={selectedPixel?.y ?? 0} />
           </button>
-          <span className="placement-spacer" aria-hidden="true" />
           <div className="placement-palette" aria-label="Палитра цветов" aria-hidden={!paletteOpen}>
             {COLORS.map((value) => (
               <button
@@ -492,6 +552,45 @@ export function BattleScreen({ online }: { online: number | null }) {
                 tabIndex={paletteOpen ? 0 : -1}
               />
             ))}
+            <input
+              className="color-spectrum"
+              type="range"
+              min="0"
+              max="359"
+              value={hexToHue(color)}
+              onChange={(event) => setColor(withAlpha(
+                pigmentToHex(Number(event.currentTarget.value), hexToPigment(color)),
+                hexAlpha(color),
+              ))}
+              aria-label="Выбрать цвет на спектре"
+              tabIndex={paletteOpen ? 0 : -1}
+              style={{ '--slider-color': hueToHex(hexToHue(color)) } as CSSProperties}
+            />
+            <input
+              className="color-pigment color-slider"
+              type="range"
+              min="0"
+              max="100"
+              value={hexToPigment(color)}
+              onChange={(event) => setColor(withAlpha(
+                pigmentToHex(hexToHue(color), Number(event.currentTarget.value)),
+                hexAlpha(color),
+              ))}
+              aria-label="Добавить белый или чёрный пигмент"
+              tabIndex={paletteOpen ? 0 : -1}
+              style={{ '--hue-color': hueToHex(hexToHue(color)), '--slider-color': color.slice(0, 7) } as CSSProperties}
+            />
+            <input
+              className="color-opacity color-slider"
+              type="range"
+              min="0"
+              max="255"
+              value={hexAlpha(color)}
+              onChange={(event) => setColor(withAlpha(color, Number(event.currentTarget.value)))}
+              aria-label="Настроить прозрачность цвета"
+              tabIndex={paletteOpen ? 0 : -1}
+              style={{ '--opaque-color': color.slice(0, 7), '--slider-color': color } as CSSProperties}
+            />
           </div>
         </div>
 

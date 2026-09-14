@@ -135,6 +135,8 @@ export function PixelBoard({ color, zoom, onZoom, eyedropper, onPickColor, onEye
     if (boardLayer && boardLayer.width === boardSize.width && boardLayer.height === boardSize.height && !boardLayerDirtyRef.current) {
       const boardContext = boardLayer.getContext('2d');
       if (boardContext) {
+        boardContext.fillStyle = '#ffffff';
+        boardContext.fillRect(pixel.x, pixel.y, 1, 1);
         boardContext.fillStyle = normalizeBoardColor(pixel.color);
         boardContext.fillRect(pixel.x, pixel.y, 1, 1);
       } else {

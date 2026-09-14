@@ -35,6 +35,7 @@ func TestLevelRewardsAlternateAndScale(t *testing.T) {
 func TestRenderMapCanvasUsesFastHexColorPath(t *testing.T) {
 	canvas := renderMapCanvas(2, 2, []domain.BoardPixel{
 		{X: 1, Y: 1, Color: "#12aBef"},
+		{X: 0, Y: 0, Color: "#00000080"},
 		{X: 0, Y: 1, Color: "invalid"},
 	})
 	painted := canvas.RGBAAt(900, 900)
@@ -44,5 +45,22 @@ func TestRenderMapCanvasUsesFastHexColorPath(t *testing.T) {
 	background := canvas.RGBAAt(100, 900)
 	if background.R != 0xff || background.G != 0xff || background.B != 0xff || background.A != 0xff {
 		t.Fatalf("invalid color changed background: %#v", background)
+	}
+	transparent := canvas.RGBAAt(100, 100)
+	if transparent.R != 0x7f || transparent.G != 0x7f || transparent.B != 0x7f || transparent.A != 0xff {
+		t.Fatalf("transparent pixel = %#v", transparent)
+	}
+}
+
+func TestColorPatternAcceptsOptionalAlpha(t *testing.T) {
+	for _, color := range []string{"#123456", "#12345678", "#abcdefFF"} {
+		if !colorPattern.MatchString(color) {
+			t.Errorf("valid color rejected: %q", color)
+		}
+	}
+	for _, color := range []string{"#12345", "#1234567", "#123456789", "#GGGGGG", "transparent"} {
+		if colorPattern.MatchString(color) {
+			t.Errorf("invalid color accepted: %q", color)
+		}
 	}
 }

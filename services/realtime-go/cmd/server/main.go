@@ -39,7 +39,7 @@ import (
 	"pixelbattle/realtime/internal/trophyrewards"
 )
 
-var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+var colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$`)
 
 const defaultBoardSize = 150
 const placementCooldown = 5 * time.Second
@@ -1979,7 +1979,7 @@ func renderMapCanvas(width, height int, pixels []domain.BoardPixel) *image.RGBA 
 		if pixel.X < 0 || pixel.Y < 0 || pixel.X >= width || pixel.Y >= height {
 			continue
 		}
-		red, green, blue, ok := parseMapColor(pixel.Color)
+		red, green, blue, alpha, ok := parseMapColor(pixel.Color)
 		if !ok {
 			continue
 		}
@@ -1988,9 +1988,9 @@ func renderMapCanvas(width, height int, pixels []domain.BoardPixel) *image.RGBA 
 		for y := pixel.Y * cellH; y < min((pixel.Y+1)*cellH, outputSize); y++ {
 			offset := y*canvas.Stride + xStart*4
 			for x := xStart; x < xEnd; x++ {
-				canvas.Pix[offset] = red
-				canvas.Pix[offset+1] = green
-				canvas.Pix[offset+2] = blue
+				canvas.Pix[offset] = blendMapChannel(red, alpha)
+				canvas.Pix[offset+1] = blendMapChannel(green, alpha)
+				canvas.Pix[offset+2] = blendMapChannel(blue, alpha)
 				canvas.Pix[offset+3] = 0xff
 				offset += 4
 			}
@@ -1999,19 +1999,26 @@ func renderMapCanvas(width, height int, pixels []domain.BoardPixel) *image.RGBA 
 	return canvas
 }
 
-func parseMapColor(value string) (byte, byte, byte, bool) {
-	if len(value) != 7 || value[0] != '#' {
-		return 0, 0, 0, false
+func parseMapColor(value string) (byte, byte, byte, byte, bool) {
+	if (len(value) != 7 && len(value) != 9) || value[0] != '#' {
+		return 0, 0, 0, 0, false
 	}
-	parts := [6]byte{}
+	parts := [8]byte{0, 0, 0, 0, 0, 0, 0xf, 0xf}
 	for index := range parts {
+		if index+1 >= len(value) {
+			break
+		}
 		nibble, ok := mapColorNibble(value[index+1])
 		if !ok {
-			return 0, 0, 0, false
+			return 0, 0, 0, 0, false
 		}
 		parts[index] = nibble
 	}
-	return parts[0]<<4 | parts[1], parts[2]<<4 | parts[3], parts[4]<<4 | parts[5], true
+	return parts[0]<<4 | parts[1], parts[2]<<4 | parts[3], parts[4]<<4 | parts[5], parts[6]<<4 | parts[7], true
+}
+
+func blendMapChannel(channel, alpha byte) byte {
+	return byte((uint16(channel)*uint16(alpha) + 255*uint16(255-alpha) + 127) / 255)
 }
 
 func mapColorNibble(value byte) (byte, bool) {

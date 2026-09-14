@@ -14,11 +14,24 @@ import { preloadRatingRewards, RatingScreen } from './components/RatingScreen';
 import { GiftsCatalogScreen, GiftsScreen, preloadGiftAssets } from './components/GiftsScreen';
 import { CaptchaOverlay } from './components/CaptchaOverlay';
 
+const localPalettePreview = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).get('preview') === 'palette';
+const localPreviewAccess: AppAccess = {
+  testMode: false,
+  isAdmin: false,
+  accessAllowed: true,
+  online: 0,
+  prizes: [],
+  pendingItemRewards: [],
+  soldOutTrophies: [],
+  captchaRequired: false,
+};
+
 export function App() {
-  const [loading, setLoading] = useState(true);
-  const [authState, setAuthState] = useState<'checking' | 'denied' | 'invalid' | 'authorized'>('checking');
-  const [appAccess, setAppAccess] = useState<AppAccess | null>(null);
-  const [screen, setScreen] = useState<'menu' | 'map' | 'stats' | 'rating' | 'agreement' | 'settings' | 'gifts' | 'gifts-catalog'>('menu');
+  const [loading, setLoading] = useState(!localPalettePreview);
+  const [authState, setAuthState] = useState<'checking' | 'denied' | 'invalid' | 'authorized'>(localPalettePreview ? 'authorized' : 'checking');
+  const [appAccess, setAppAccess] = useState<AppAccess | null>(localPalettePreview ? localPreviewAccess : null);
+  const [screen, setScreen] = useState<'menu' | 'map' | 'stats' | 'rating' | 'agreement' | 'settings' | 'gifts' | 'gifts-catalog'>(localPalettePreview ? 'map' : 'menu');
   const maintenanceMode = appAccess?.accessAllowed === false;
 
   useEffect(() => {
@@ -92,6 +105,7 @@ export function App() {
   }, [loading, screen]);
 
   useEffect(() => {
+    if (localPalettePreview) return;
     let active = true;
     let retryTimer = 0;
     let telegramTimer = 0;
